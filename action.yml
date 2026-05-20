@@ -1,0 +1,120 @@
+name: "cfn-drift-extended"
+description: "Detect additive drift in CloudFormation-managed resources (IAM, Security Groups, SNS, SQS, EventBridge)"
+branding:
+  icon: "shield"
+  color: "orange"
+
+inputs:
+  stack-prefix:
+    description: "CloudFormation stack name prefix to audit"
+    required: false
+    default: ""
+  stack-name:
+    description: "Exact stack name(s) to audit (comma-separated)"
+    required: false
+    default: ""
+  region:
+    description: "AWS region to scan"
+    required: false
+    default: "us-east-1"
+  services:
+    description: "Comma-separated list of services to audit (iam,sg,sns,sqs,eventbridge). Default: all"
+    required: false
+    default: ""
+  fail-on-drift:
+    description: "Fail the action if drift is detected"
+    required: false
+    default: "true"
+  output-json:
+    description: "Path to write JSON report"
+    required: false
+    default: ""
+  max-workers:
+    description: "Maximum concurrent API calls (1-50)"
+    required: false
+    default: "10"
+
+outputs:
+  drift-detected:
+    description: "Whether drift was detected (true/false)"
+    value: ${{ steps.audit.outputs.drift-detected }}
+  findings-count:
+    description: "Number of drift findings"
+    value: ${{ steps.audit.outputs.findings-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install cfn-drift-extended
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - name: Run audit
+      id: audit
+      shell: bash
+      env:
+        INPUT_STACK_PREFIX: ${{ inputs.stack-prefix }}
+        INPUT_STACK_NAME: ${{ inputs.stack-name }}
+        INPUT_REGION: ${{ inputs.region }}
+        INPUT_SERVICES: ${{ inputs.services }}
+        INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+        INPUT_OUTPUT_JSON: ${{ inputs.output-json }}
+        INPUT_MAX_WORKERS: ${{ inputs.max-workers }}
+      run: |
+        ARGS="audit --region ${INPUT_REGION} --max-workers ${INPUT_MAX_WORKERS}"
+
+        # Stack filter (prefix or name)
+        if [ -n "${INPUT_STACK_PREFIX}" ]; then
+          ARGS="${ARGS} --stack-prefix ${INPUT_STACK_PREFIX}"
+        elif [ -n "${INPUT_STACK_NAME}" ]; then
+          IFS=',' read -ra NAMES <<< "${INPUT_STACK_NAME}"
+          for name in "${NAMES[@]}"; do
+            ARGS="${ARGS} --stack-name ${name}"
+          done
+        else
+          echo "::error::Must provide either stack-prefix or stack-name input"
+          exit 1
+        fi
+
+        # Services filter
+        if [ -n "${INPUT_SERVICES}" ]; then
+          ARGS="${ARGS} --services ${INPUT_SERVICES}"
+        fi
+
+        # Fail on drift
+        if [ "${INPUT_FAIL_ON_DRIFT}" = "false" ]; then
+          ARGS="${ARGS} --no-fail-on-drift"
+        fi
+
+        # JSON output
+        if [ -n "${INPUT_OUTPUT_JSON}" ]; then
+          ARGS="${ARGS} --output-json ${INPUT_OUTPUT_JSON}"
+        fi
+
+        # Run and capture exit code
+        set +e
+        cfn-drift-extended ${ARGS}
+        EXIT_CODE=$?
+        set -e
+
+        # Set outputs
+        if [ ${EXIT_CODE} -eq 1 ]; then
+          echo "drift-detected=true" >> $GITHUB_OUTPUT
+        else
+          echo "drift-detected=false" >> $GITHUB_OUTPUT
+        fi
+
+        # Extract findings count from JSON if available
+        if [ -n "${INPUT_OUTPUT_JSON}" ] && [ -f "${INPUT_OUTPUT_JSON}" ]; then
+          COUNT=$(python3 -c "import json; print(len(json.load(open('${INPUT_OUTPUT_JSON}'))['findings']))")
+          echo "findings-count=${COUNT}" >> $GITHUB_OUTPUT
+        else
+          echo "findings-count=0" >> $GITHUB_OUTPUT
+        fi
+
+        exit ${EXIT_CODE}

@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Nested stack with an IAM role for testing nested stack traversal.
+
+Resources:
+  NestedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-nested-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: NestedRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 'arn:aws:s3:::drift-test-bucket/*'
+
+Outputs:
+  NestedRoleName:
+    Value: !Ref NestedRole

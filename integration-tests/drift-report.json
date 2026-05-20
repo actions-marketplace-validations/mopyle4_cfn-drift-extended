@@ -1,0 +1,600 @@
+{
+  "tool_version": "0.1.0",
+  "account_id": "931447415810",
+  "region": "us-east-1",
+  "timestamp": "2026-05-20T19:51:03.096788+00:00",
+  "stacks_scanned": 1,
+  "resources_scanned": 9,
+  "resources_with_drift": 7,
+  "findings": [
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-processor",
+      "stack_name": "drift-test-stack",
+      "drift_type": "inline_policy_modified",
+      "severity": "high",
+      "description": "Inline policy 'SQSAccess' on role 'drift-test-processor' has been modified. The policy document differs from what is declared in the CloudFormation template.",
+      "expected": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:ReceiveMessage",
+              "sqs:DeleteMessage"
+            ],
+            "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+          }
+        ]
+      },
+      "actual": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:ReceiveMessage",
+              "sqs:DeleteMessage"
+            ],
+            "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:SendMessage"
+            ],
+            "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-output-queue"
+          }
+        ]
+      },
+      "extra": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "sqs:SendMessage"
+          ],
+          "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-output-queue"
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-bare",
+      "stack_name": "drift-test-stack",
+      "drift_type": "inline_policy_added",
+      "severity": "high",
+      "description": "Inline policy 'SneakyPolicy' exists on role 'drift-test-bare' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [],
+      "actual": [
+        "SneakyPolicy"
+      ],
+      "extra": "SneakyPolicy"
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-basic-lambda",
+      "stack_name": "drift-test-stack",
+      "drift_type": "inline_policy_added",
+      "severity": "high",
+      "description": "Inline policy 'ManualS3Access' exists on role 'drift-test-basic-lambda' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [
+        "DynamoDBAccess"
+      ],
+      "actual": [
+        "DynamoDBAccess",
+        "ManualS3Access"
+      ],
+      "extra": "ManualS3Access"
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-basic-lambda",
+      "stack_name": "drift-test-stack",
+      "drift_type": "managed_policy_attached",
+      "severity": "high",
+      "description": "Managed policy 'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess' is attached to role 'drift-test-basic-lambda' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      ],
+      "actual": [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+      ],
+      "extra": "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-multi-drift",
+      "stack_name": "drift-test-stack",
+      "drift_type": "inline_policy_added",
+      "severity": "high",
+      "description": "Inline policy 'UnauthorizedEC2Access' exists on role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [],
+      "actual": [
+        "UnauthorizedEC2Access",
+        "UnauthorizedIAMAccess"
+      ],
+      "extra": "UnauthorizedEC2Access"
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-multi-drift",
+      "stack_name": "drift-test-stack",
+      "drift_type": "inline_policy_added",
+      "severity": "high",
+      "description": "Inline policy 'UnauthorizedIAMAccess' exists on role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [],
+      "actual": [
+        "UnauthorizedEC2Access",
+        "UnauthorizedIAMAccess"
+      ],
+      "extra": "UnauthorizedIAMAccess"
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-multi-drift",
+      "stack_name": "drift-test-stack",
+      "drift_type": "managed_policy_attached",
+      "severity": "high",
+      "description": "Managed policy 'arn:aws:iam::aws:policy/AdministratorAccess' is attached to role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [],
+      "actual": [
+        "arn:aws:iam::aws:policy/AdministratorAccess"
+      ],
+      "extra": "arn:aws:iam::aws:policy/AdministratorAccess"
+    },
+    {
+      "resource_type": "AWS::EC2::SecurityGroup",
+      "resource_id": "sg-0b7a2542ddb09edd6",
+      "stack_name": "drift-test-stack",
+      "drift_type": "security_group_ingress_added",
+      "severity": "high",
+      "description": "Ingress rule (tcp 22-22 0.0.0.0/0) exists on security group 'sg-0b7a2542ddb09edd6' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [
+        [
+          "tcp",
+          443,
+          443,
+          "10.0.0.0/8",
+          null,
+          null,
+          null
+        ]
+      ],
+      "actual": [
+        [
+          "tcp",
+          22,
+          22,
+          "0.0.0.0/0",
+          null,
+          null,
+          null
+        ],
+        [
+          "tcp",
+          443,
+          443,
+          "10.0.0.0/8",
+          null,
+          null,
+          null
+        ]
+      ],
+      "extra": [
+        "tcp",
+        22,
+        22,
+        "0.0.0.0/0",
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "resource_type": "AWS::SQS::Queue",
+      "resource_id": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+      "stack_name": "drift-test-stack",
+      "drift_type": "sqs_policy_statement_added",
+      "severity": "high",
+      "description": "Policy statement with Sid 'SneakyAccess' exists on SQS queue 'arn:aws:sqs:us-east-1:931447415810:drift-test-queue' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [
+        {
+          "Sid": "AllowSNSPublish",
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "sns.amazonaws.com"
+          },
+          "Action": "sqs:SendMessage",
+          "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+          "Condition": {
+            "ArnEquals": {
+              "aws:SourceArn": "arn:aws:sns:us-east-1:931447415810:drift-test-topic"
+            }
+          }
+        }
+      ],
+      "actual": [
+        {
+          "Sid": "AllowSNSPublish",
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "sns.amazonaws.com"
+          },
+          "Action": "sqs:SendMessage",
+          "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+          "Condition": {
+            "ArnEquals": {
+              "aws:SourceArn": "arn:aws:sns:us-east-1:931447415810:drift-test-topic"
+            }
+          }
+        },
+        {
+          "Sid": "SneakyAccess",
+          "Effect": "Allow",
+          "Principal": {
+            "AWS": "arn:aws:iam::931447415810:root"
+          },
+          "Action": "sqs:*",
+          "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+        }
+      ],
+      "extra": {
+        "Sid": "SneakyAccess",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::931447415810:root"
+        },
+        "Action": "sqs:*",
+        "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+      }
+    },
+    {
+      "resource_type": "AWS::Events::Rule",
+      "resource_id": "drift-test-bus",
+      "stack_name": "drift-test-stack",
+      "drift_type": "eventbridge_rule_added",
+      "severity": "medium",
+      "description": "Rule 'sneaky-exfil-rule' exists on event bus 'drift-test-bus' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+      "expected": [
+        "drift-test-rule"
+      ],
+      "actual": [
+        "drift-test-rule",
+        "sneaky-exfil-rule"
+      ],
+      "extra": "sneaky-exfil-rule"
+    }
+  ],
+  "audits": [
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-processor",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-processor",
+          "stack_name": "drift-test-stack",
+          "drift_type": "inline_policy_modified",
+          "severity": "high",
+          "description": "Inline policy 'SQSAccess' on role 'drift-test-processor' has been modified. The policy document differs from what is declared in the CloudFormation template.",
+          "expected": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sqs:ReceiveMessage",
+                  "sqs:DeleteMessage"
+                ],
+                "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+              }
+            ]
+          },
+          "actual": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sqs:ReceiveMessage",
+                  "sqs:DeleteMessage"
+                ],
+                "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sqs:SendMessage"
+                ],
+                "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-output-queue"
+              }
+            ]
+          },
+          "extra": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sqs:SendMessage"
+              ],
+              "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-output-queue"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-bare",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-bare",
+          "stack_name": "drift-test-stack",
+          "drift_type": "inline_policy_added",
+          "severity": "high",
+          "description": "Inline policy 'SneakyPolicy' exists on role 'drift-test-bare' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [],
+          "actual": [
+            "SneakyPolicy"
+          ],
+          "extra": "SneakyPolicy"
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-basic-lambda",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-basic-lambda",
+          "stack_name": "drift-test-stack",
+          "drift_type": "inline_policy_added",
+          "severity": "high",
+          "description": "Inline policy 'ManualS3Access' exists on role 'drift-test-basic-lambda' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [
+            "DynamoDBAccess"
+          ],
+          "actual": [
+            "DynamoDBAccess",
+            "ManualS3Access"
+          ],
+          "extra": "ManualS3Access"
+        },
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-basic-lambda",
+          "stack_name": "drift-test-stack",
+          "drift_type": "managed_policy_attached",
+          "severity": "high",
+          "description": "Managed policy 'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess' is attached to role 'drift-test-basic-lambda' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+          ],
+          "actual": [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+          ],
+          "extra": "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-cdk-style",
+      "stack_name": "drift-test-stack",
+      "in_sync": true,
+      "findings": []
+    },
+    {
+      "resource_type": "AWS::IAM::Role",
+      "resource_id": "drift-test-multi-drift",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-multi-drift",
+          "stack_name": "drift-test-stack",
+          "drift_type": "inline_policy_added",
+          "severity": "high",
+          "description": "Inline policy 'UnauthorizedEC2Access' exists on role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [],
+          "actual": [
+            "UnauthorizedEC2Access",
+            "UnauthorizedIAMAccess"
+          ],
+          "extra": "UnauthorizedEC2Access"
+        },
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-multi-drift",
+          "stack_name": "drift-test-stack",
+          "drift_type": "inline_policy_added",
+          "severity": "high",
+          "description": "Inline policy 'UnauthorizedIAMAccess' exists on role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [],
+          "actual": [
+            "UnauthorizedEC2Access",
+            "UnauthorizedIAMAccess"
+          ],
+          "extra": "UnauthorizedIAMAccess"
+        },
+        {
+          "resource_type": "AWS::IAM::Role",
+          "resource_id": "drift-test-multi-drift",
+          "stack_name": "drift-test-stack",
+          "drift_type": "managed_policy_attached",
+          "severity": "high",
+          "description": "Managed policy 'arn:aws:iam::aws:policy/AdministratorAccess' is attached to role 'drift-test-multi-drift' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [],
+          "actual": [
+            "arn:aws:iam::aws:policy/AdministratorAccess"
+          ],
+          "extra": "arn:aws:iam::aws:policy/AdministratorAccess"
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::EC2::SecurityGroup",
+      "resource_id": "sg-0b7a2542ddb09edd6",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::EC2::SecurityGroup",
+          "resource_id": "sg-0b7a2542ddb09edd6",
+          "stack_name": "drift-test-stack",
+          "drift_type": "security_group_ingress_added",
+          "severity": "high",
+          "description": "Ingress rule (tcp 22-22 0.0.0.0/0) exists on security group 'sg-0b7a2542ddb09edd6' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [
+            [
+              "tcp",
+              443,
+              443,
+              "10.0.0.0/8",
+              null,
+              null,
+              null
+            ]
+          ],
+          "actual": [
+            [
+              "tcp",
+              22,
+              22,
+              "0.0.0.0/0",
+              null,
+              null,
+              null
+            ],
+            [
+              "tcp",
+              443,
+              443,
+              "10.0.0.0/8",
+              null,
+              null,
+              null
+            ]
+          ],
+          "extra": [
+            "tcp",
+            22,
+            22,
+            "0.0.0.0/0",
+            null,
+            null,
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::SQS::Queue",
+      "resource_id": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::SQS::Queue",
+          "resource_id": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+          "stack_name": "drift-test-stack",
+          "drift_type": "sqs_policy_statement_added",
+          "severity": "high",
+          "description": "Policy statement with Sid 'SneakyAccess' exists on SQS queue 'arn:aws:sqs:us-east-1:931447415810:drift-test-queue' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [
+            {
+              "Sid": "AllowSNSPublish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Action": "sqs:SendMessage",
+              "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": "arn:aws:sns:us-east-1:931447415810:drift-test-topic"
+                }
+              }
+            }
+          ],
+          "actual": [
+            {
+              "Sid": "AllowSNSPublish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Action": "sqs:SendMessage",
+              "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": "arn:aws:sns:us-east-1:931447415810:drift-test-topic"
+                }
+              }
+            },
+            {
+              "Sid": "SneakyAccess",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::931447415810:root"
+              },
+              "Action": "sqs:*",
+              "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+            }
+          ],
+          "extra": {
+            "Sid": "SneakyAccess",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::931447415810:root"
+            },
+            "Action": "sqs:*",
+            "Resource": "arn:aws:sqs:us-east-1:931447415810:drift-test-queue"
+          }
+        }
+      ]
+    },
+    {
+      "resource_type": "AWS::SNS::Topic",
+      "resource_id": "arn:aws:sns:us-east-1:931447415810:drift-test-topic",
+      "stack_name": "drift-test-stack",
+      "in_sync": true,
+      "findings": []
+    },
+    {
+      "resource_type": "AWS::Events::Rule",
+      "resource_id": "drift-test-bus",
+      "stack_name": "drift-test-stack",
+      "in_sync": false,
+      "findings": [
+        {
+          "resource_type": "AWS::Events::Rule",
+          "resource_id": "drift-test-bus",
+          "stack_name": "drift-test-stack",
+          "drift_type": "eventbridge_rule_added",
+          "severity": "medium",
+          "description": "Rule 'sneaky-exfil-rule' exists on event bus 'drift-test-bus' but is not declared in the CloudFormation template for stack 'drift-test-stack'",
+          "expected": [
+            "drift-test-rule"
+          ],
+          "actual": [
+            "drift-test-rule",
+            "sneaky-exfil-rule"
+          ],
+          "extra": "sneaky-exfil-rule"
+        }
+      ]
+    }
+  ],
+  "errors": []
+}

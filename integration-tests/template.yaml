@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  cfn-drift-extended integration test stack.
+  Deploys IAM roles with known policy configurations for drift testing.
+
+Resources:
+  # Scenario 1 & 2: Role with one inline policy and one managed policy.
+  # We'll add extra policies outside CFN to test detection.
+  BasicLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-basic-lambda
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/drift-test-*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # Scenario 3: Role with inline policy that will be modified.
+  ProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-processor
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                Resource: !Sub 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:drift-test-queue'
+
+  # Scenario 4: CDK-style pattern with external AWS::IAM::Policy resource.
+  # This should NOT be reported as drift.
+  CdkStyleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-cdk-style
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  CdkStyleRoleDefaultPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CdkStyleRoleDefaultPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: '*'
+      Roles:
+        - !Ref CdkStyleRole
+
+  # Scenario 6: Role that will get multiple extra policies.
+  MultiDriftRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-multi-drift
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Scenario 7: Minimal role with no policies at all.
+  BareRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drift-test-bare
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Security Group resources for SG drift testing
+  # ─────────────────────────────────────────────────────────────────────────
+  TestVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: drift-test-vpc
+
+  TestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: drift-test-sg
+      GroupDescription: Security group for drift testing
+      VpcId: !Ref TestVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: Allow HTTPS from internal
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS outbound
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SNS/SQS resources for policy and subscription drift testing
+  # ─────────────────────────────────────────────────────────────────────────
+  TestQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: drift-test-queue
+
+  TestQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref TestQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSNSPublish
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt TestQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref TestTopic
+
+  TestTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: drift-test-topic
+
+  TestTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref TestTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountPublish
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sns:Publish
+            Resource: !Ref TestTopic
+
+  TestSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref TestTopic
+      Protocol: sqs
+      Endpoint: !GetAtt TestQueue.Arn
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # EventBridge resources for rule drift testing
+  # ─────────────────────────────────────────────────────────────────────────
+  TestEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: drift-test-bus
+
+  TestEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: drift-test-rule
+      EventBusName: !Ref TestEventBus
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+      State: ENABLED
+      Targets:
+        - Id: queue-target
+          Arn: !GetAtt TestQueue.Arn
+
+Outputs:
+  BasicLambdaRoleName:
+    Value: !Ref BasicLambdaRole
+  ProcessorRoleName:
+    Value: !Ref ProcessorRole
+  CdkStyleRoleName:
+    Value: !Ref CdkStyleRole
+  MultiDriftRoleName:
+    Value: !Ref MultiDriftRole
+  BareRoleName:
+    Value: !Ref BareRole
+  TestSecurityGroupId:
+    Value: !Ref TestSecurityGroup
+  TestQueueUrl:
+    Value: !Ref TestQueue
+  TestQueueArn:
+    Value: !GetAtt TestQueue.Arn
+  TestTopicArn:
+    Value: !Ref TestTopic
+  TestEventBusName:
+    Value: !Ref TestEventBus

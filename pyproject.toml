@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cfn-drift-extended"
+version = "0.1.0"
+description = "Detect additive drift in CloudFormation-managed resources that native drift detection misses"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Morris Pyle", email = "mopyle@amazon.com" },
+]
+keywords = ["aws", "cloudformation", "drift", "iam", "security", "audit", "cdk", "security-groups", "sns", "sqs", "eventbridge"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+    "Typing :: Typed",
+]
+dependencies = [
+    "boto3>=1.34.0",
+    "click>=8.1.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "moto[iam,cloudformation,sts,ec2,sqs,sns,events]>=5.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "boto3-stubs[iam,cloudformation,sts]>=1.34.0",
+]
+
+[project.scripts]
+cfn-drift-extended = "cfn_drift_extended.cli:main"
+
+[project.urls]
+Homepage = "https://code.aws.dev/personal_projects/alias_m/mopyle/cfn-drift-extended"
+Repository = "https://code.aws.dev/personal_projects/alias_m/mopyle/cfn-drift-extended"
+Issues = "https://code.aws.dev/personal_projects/alias_m/mopyle/cfn-drift-extended/-/issues"
+Documentation = "https://code.aws.dev/personal_projects/alias_m/mopyle/cfn-drift-extended/-/blob/mainline/README.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cfn_drift_extended"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
