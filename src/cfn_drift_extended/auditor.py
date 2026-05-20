@@ -47,6 +47,13 @@ _BOTO_CONFIG = Config(
 ALL_SERVICES = frozenset({"iam", "sg", "sns", "sqs", "eventbridge"})
 
 
+# Paths that indicate AWS service-linked roles (not user-managed)
+_SERVICE_LINKED_ROLE_PREFIXES = (
+    "aws-service-role/",
+    "AWSServiceRoleFor",
+)
+
+
 class Auditor:
     """Orchestrates the full audit pipeline: collect → compare → report.
 
@@ -493,7 +500,22 @@ class Auditor:
         return audits, errors
 
     def _audit_single_role(self, expected: ExpectedRoleState) -> ResourceAudit | None:
-        """Audit a single IAM role against its expected state."""
+        """Audit a single IAM role against its expected state.
+
+        Skips service-linked roles (created by AWS services, not user-managed).
+        """
+        # Skip service-linked roles — they're AWS-managed, not user drift
+        if any(
+            expected.role_name.startswith(prefix)
+            for prefix in _SERVICE_LINKED_ROLE_PREFIXES
+        ):
+            logger.debug(
+                "Skipping service-linked role '%s' in stack '%s'",
+                expected.role_name,
+                expected.stack_name,
+            )
+            return None
+
         actual = self._iam_collector.get_role_state(expected.role_name)
         if actual is None:
             logger.warning(
