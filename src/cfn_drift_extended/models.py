@@ -1,4 +1,4 @@
-"""Domain models for drift findings.
+"""Domain models for drift findings and orphan detection.
 
 Uses Pydantic for validation, serialization, and schema generation.
 Frozen models ensure immutability after creation.
@@ -106,3 +106,68 @@ class AuditReport(BaseModel):
     @property
     def has_errors(self) -> bool:
         return len(self.errors) > 0
+
+
+# ─── Orphaned Resource Detection Models ───────────────────────────────────────
+
+
+class OrphanType(StrEnum):
+    """Type of orphaned resource detected."""
+
+    IAM_ROLE_ORPHANED = "iam_role_orphaned"
+    SECURITY_GROUP_ORPHANED = "security_group_orphaned"
+    LAMBDA_FUNCTION_ORPHANED = "lambda_function_orphaned"
+    SQS_QUEUE_ORPHANED = "sqs_queue_orphaned"
+    SNS_TOPIC_ORPHANED = "sns_topic_orphaned"
+
+
+class OrphanFinding(BaseModel, frozen=True):
+    """A single orphaned resource finding.
+
+    Immutable after creation to prevent accidental mutation during reporting.
+    """
+
+    resource_type: str = Field(description="AWS resource type (e.g., AWS::IAM::Role)")
+    resource_id: str = Field(description="Physical resource identifier")
+    orphan_type: OrphanType
+    severity: Severity
+    description: str = Field(description="Human-readable description of the orphan")
+    created_date: str | None = Field(
+        default=None, description="When the resource was created"
+    )
+    last_used: str | None = Field(
+        default=None, description="When the resource was last used"
+    )
+    region: str = Field(description="AWS region where the resource exists")
+
+
+class OrphanReport(BaseModel):
+    """Complete orphan detection report."""
+
+    # Metadata
+    tool_version: str = ""
+    account_id: str = ""
+    region: str = ""
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat()
+    )
+
+    # Counts
+    resources_scanned: int = 0
+    orphans_found: int = 0
+
+    # Results
+    findings: list[OrphanFinding] = Field(default_factory=list)
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Non-fatal errors encountered during orphan detection",
+    )
+    filters_applied: list[str] = Field(
+        default_factory=list,
+        description="Exclusion filters that were applied",
+    )
+
+    @property
+    def has_orphans(self) -> bool:
+        """Return True if any orphaned resources were found."""
+        return self.orphans_found > 0

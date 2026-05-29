@@ -12,6 +12,7 @@ import click
 
 from cfn_drift_extended.auditor import ALL_SERVICES, Auditor
 from cfn_drift_extended.exceptions import AWSPermissionError, CfnDriftExtendedError
+from cfn_drift_extended.orphan_auditor import ALL_ORPHAN_SERVICES, OrphanAuditor
 from cfn_drift_extended.reporters.console import ConsoleReporter
 from cfn_drift_extended.reporters.json_report import JsonReporter
 
@@ -217,3 +218,172 @@ def audit(
     # Exit code for CI/CD
     if fail_on_drift and report.has_drift:
         sys.exit(1)
+
+
+@main.command()
+@click.option(
+    "--stack-prefix",
+    default=None,
+    callback=_validate_stack_prefix,
+    help="Only consider stacks with this prefix for the managed resource index.",
+)
+@click.option(
+    "--stack-name",
+    multiple=True,
+    help="Exact stack name(s) for the managed index. Can be specified multiple times.",
+)
+@click.option(
+    "--region",
+    default="us-east-1",
+    show_default=True,
+    callback=_validate_region,
+    help="AWS region to scan.",
+)
+@click.option(
+    "--profile",
+    default=None,
+    help="AWS profile name to use (from ~/.aws/config).",
+)
+@click.option(
+    "--output-json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Write JSON report to this file path.",
+)
+@click.option(
+    "--fail-on-orphans/--no-fail-on-orphans",
+    default=False,
+    show_default=True,
+    help="Exit with non-zero code if orphans are detected (useful for CI).",
+)
+@click.option(
+    "--verbose", "-v",
+    is_flag=True,
+    default=False,
+    help="Enable verbose logging.",
+)
+@click.option(
+    "--max-workers",
+    type=click.IntRange(min=1, max=50),
+    default=10,
+    show_default=True,
+    help="Maximum concurrent API calls for orphan detection.",
+)
+@click.option(
+    "--services",
+    default=None,
+    help=(
+        "Comma-separated list of services to scan for orphans. "
+        "Options: iam,sg,lambda,sqs,sns. Default: all."
+    ),
+)
+def orphans(
+    stack_prefix: str | None,
+    stack_name: tuple[str, ...],
+    region: str,
+    profile: str | None,
+    output_json: Path | None,
+    fail_on_orphans: bool,
+    verbose: bool,
+    max_workers: int,
+    services: str | None,
+) -> None:
+    """Detect orphaned resources not managed by any CloudFormation stack."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+    try:
+        # Parse services filter
+        enabled_services: frozenset[str] | None = None
+        if services:
+            requested = frozenset(s.strip().lower() for s in services.split(","))
+            invalid = requested - ALL_ORPHAN_SERVICES
+            if invalid:
+                click.secho(
+                    f"Error: Invalid service(s): {', '.join(sorted(invalid))}. "
+                    f"Valid options: {', '.join(sorted(ALL_ORPHAN_SERVICES))}",
+                    fg="red",
+                    err=True,
+                )
+                sys.exit(2)
+            enabled_services = requested
+
+        auditor = OrphanAuditor(
+            region=region,
+            profile=profile,
+            services=enabled_services,
+            max_workers=max_workers,
+        )
+        report = auditor.detect_orphans(
+            stack_prefix=stack_prefix or "",
+            stack_names=list(stack_name) if stack_name else None,
+        )
+    except AWSPermissionError as e:
+        click.secho(f"\n✗ Permission error: {e}", fg="red", err=True)
+        if e.details:
+            click.secho(f"  Details: {e.details}", fg="red", err=True)
+        sys.exit(2)
+    except CfnDriftExtendedError as e:
+        click.secho(f"\n✗ Error: {e}", fg="red", err=True)
+        sys.exit(2)
+    except Exception as e:
+        click.secho(f"\n✗ Unexpected error: {e}", fg="red", err=True)
+        logger = logging.getLogger(__name__)
+        logger.debug("Full traceback:", exc_info=True)
+        sys.exit(2)
+
+    # Console output
+    _render_orphan_report(report)
+
+    # JSON output
+    if output_json:
+        json_str = report.model_dump_json(indent=2)
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        output_json.write_text(json_str, encoding="utf-8")
+        click.echo(f"\nJSON report written to: {output_json}")
+
+    # Report non-fatal errors
+    if report.errors:
+        click.secho(
+            f"\n⚠ {len(report.errors)} non-fatal error(s) occurred during scan.",
+            fg="yellow",
+            err=True,
+        )
+
+    # Exit code for CI/CD
+    if fail_on_orphans and report.has_orphans:
+        sys.exit(1)
+
+
+def _render_orphan_report(report) -> None:
+    """Render orphan report to the console."""
+    click.secho("═" * 60, fg="cyan")
+    click.secho("  cfn-drift-extended — Orphaned Resource Report", fg="cyan", bold=True)
+    click.secho("═" * 60, fg="cyan")
+    click.echo(f"  Resources in managed index: {report.resources_scanned}")
+    click.echo(f"  Orphans found:             {report.orphans_found}")
+
+    if not report.has_orphans:
+        click.secho("\n✓ No orphaned resources detected.", fg="green", bold=True)
+        return
+
+    click.secho(
+        f"\n⚠ Found {report.orphans_found} orphaned resource(s):",
+        fg="red",
+        bold=True,
+    )
+    click.echo()
+
+    _severity_colors = {"high": "red", "medium": "yellow", "low": "blue"}
+
+    for finding in report.findings:
+        color = _severity_colors.get(finding.severity.value, "white")
+        severity_label = finding.severity.value.upper()
+        click.secho(f"  [{severity_label}] ", fg=color, bold=True, nl=False)
+        click.echo(f"{finding.resource_id}")
+        click.echo(f"         {finding.description}")
+        if finding.created_date:
+            click.echo(f"         Created: {finding.created_date}")
+        click.echo()
