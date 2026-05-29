@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/Tests-137%20passing-brightgreen.svg)](#-development)
-[![AWS Services](https://img.shields.io/badge/AWS-IAM%20%7C%20SG%20%7C%20SNS%20%7C%20SQS%20%7C%20EventBridge-orange.svg)](#-supported-services)
+[![Tests](https://img.shields.io/badge/Tests-203%20passing-brightgreen.svg)](#-development)
+[![AWS Services](https://img.shields.io/badge/AWS-IAM%20%7C%20SG%20%7C%20SNS%20%7C%20SQS%20%7C%20EventBridge%20%7C%20Lambda%20%7C%20S3%20%7C%20DynamoDB-orange.svg)](#-supported-services)
 [![CI/CD Ready](https://img.shields.io/badge/CI%2FCD-Ready-purple.svg)](#-github-action-usage)
 
 Detect **additive drift** in CloudFormation-managed resources that native drift detection misses.
@@ -16,6 +16,7 @@ Detect **additive drift** in CloudFormation-managed resources that native drift 
 - [Supported Services](#-supported-services)
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
+- [Orphaned Resource Detection](#-orphaned-resource-detection)
 - [IAM Permissions](#-required-iam-permissions-least-privilege)
 - [Exit Codes](#-exit-codes)
 - [Example Output](#-example-output)
@@ -99,6 +100,38 @@ cfn-drift-extended audit --stack-prefix my-app -v
 # Control concurrency (default: 10 parallel workers)
 cfn-drift-extended audit --stack-prefix my-app --max-workers 5
 ```
+
+---
+
+## 🔎 Orphaned Resource Detection
+
+Detect resources that exist in your account but aren't managed by any CloudFormation stack — manually created resources that were never cleaned up.
+
+```bash
+# Detect orphaned resources across all services
+cfn-drift-extended orphans --region us-east-1
+
+# Scope the managed index to specific stacks
+cfn-drift-extended orphans --stack-prefix my-app --region us-east-1
+
+# Scan only specific services
+cfn-drift-extended orphans --services sqs,sns --region us-east-1
+
+# Fail in CI if orphans found
+cfn-drift-extended orphans --stack-prefix my-app --fail-on-orphans
+
+# Write JSON report
+cfn-drift-extended orphans --stack-prefix my-app --output-json orphans.json
+```
+
+**Supported orphan detection services:** `iam`, `sg`, `lambda`, `sqs`, `sns`
+
+**Exclusion filters applied automatically:**
+- AWS service-linked roles (`/aws-service-role/`)
+- CDK bootstrap roles (name contains `cdk-`)
+- Default security groups (cannot be deleted)
+- CDK custom resource Lambda handlers (`LogRetention`, `Custom::`)
+- FIFO DLQ queues (`-dlq.fifo`, `-deadletter.fifo`)
 
 ---
 
