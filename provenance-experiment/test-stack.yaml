@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  cfn-drift-extended provenance test stack.
+  Both resources use DeletionPolicy: Retain so they survive stack deletion,
+  producing the CFN_ORPHAN_DELETED_STACK case for the detector to classify.
+
+Resources:
+  TestRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: cfndx-prov-test-role-cfn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  TestQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: cfndx-prov-test-queue-cfn
+
+Outputs:
+  RoleName:
+    Value: !Ref TestRole
+  QueueUrl:
+    Value: !Ref TestQueue

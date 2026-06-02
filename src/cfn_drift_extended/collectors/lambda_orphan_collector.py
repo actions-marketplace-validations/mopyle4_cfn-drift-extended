@@ -16,17 +16,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from cfn_drift_extended.collectors._aws import BOTO_CONFIG
+from cfn_drift_extended.collectors._datetime_utils import (
+    days_since,
+    format_datetime,
+)
+from cfn_drift_extended.collectors.cfn_managed_index import ManagedIndex
 from cfn_drift_extended.collectors.orphan_filters import is_excluded_lambda
 from cfn_drift_extended.models import OrphanFinding, OrphanType, Severity
 
 logger = logging.getLogger(__name__)
-
-_BOTO_CONFIG = Config(
-    retries={"max_attempts": 5, "mode": "adaptive"},
-)
 
 # Functions not modified or invoked for longer than this are flagged as stale.
 _STALE_THRESHOLD_DAYS = 90
@@ -51,16 +52,18 @@ class LambdaOrphanCollector:
     def __init__(self, session: boto3.Session, region: str) -> None:
         self._session = session
         self._region = region
-        self._lambda = session.client("lambda", config=_BOTO_CONFIG)
-        self._cloudwatch = session.client("cloudwatch", config=_BOTO_CONFIG)
+        self._lambda = session.client("lambda", config=BOTO_CONFIG)
+        self._cloudwatch = session.client("cloudwatch", config=BOTO_CONFIG)
 
     def detect_orphaned_functions(
-        self, managed_index: frozenset[str]
+        self, managed_index: ManagedIndex | frozenset[str]
     ) -> list[OrphanFinding]:
         """Detect Lambda functions not managed by any CloudFormation stack.
 
         Args:
-            managed_index: Set of physical resource IDs managed by CFN.
+            managed_index: ManagedIndex (or a plain set, for backward
+                compatibility with tests) of physical resource IDs managed
+                by CloudFormation.
 
         Returns:
             List of OrphanFinding for each orphaned function.
@@ -84,8 +87,8 @@ class LambdaOrphanCollector:
                 continue
 
             last_modified = function.get("LastModified")
-            last_modified_iso = self._normalize_timestamp(last_modified)
-            modified_stale_days = self._days_since(last_modified)
+            last_modified_iso = format_datetime(last_modified)
+            modified_stale_days = days_since(last_modified)
 
             # Consult CloudWatch only for candidate orphans to keep cost down.
             last_invocation = self._get_last_invocation(function_name)
@@ -204,43 +207,3 @@ class LambdaOrphanCollector:
                 )
 
         return description
-
-    @staticmethod
-    def _normalize_timestamp(value: str | None) -> str | None:
-        """Return the LastModified value as an ISO string, or None."""
-        if not value:
-            return None
-        return str(value)
-
-    @classmethod
-    def _days_since(cls, value: str | None) -> int | None:
-        """Return whole days between the LastModified timestamp and now (UTC).
-
-        Lambda reports ``LastModified`` as an ISO 8601 string such as
-        ``2026-05-29T21:53:58.706+0000`` or with a trailing ``Z``. Returns None
-        if the value is missing or cannot be parsed.
-        """
-        if not value:
-            return None
-
-        parsed = cls._parse_timestamp(value)
-        if parsed is None:
-            return None
-
-        now = datetime.now(UTC)
-        reference = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-        delta = now - reference
-        return max(delta.days, 0)
-
-    @staticmethod
-    def _parse_timestamp(value: str) -> datetime | None:
-        """Parse a Lambda LastModified timestamp into a datetime."""
-        candidate = value.strip()
-        # Normalize a trailing 'Z' to an explicit UTC offset for fromisoformat.
-        if candidate.endswith("Z"):
-            candidate = candidate[:-1] + "+00:00"
-        try:
-            return datetime.fromisoformat(candidate)
-        except ValueError:
-            logger.debug("Could not parse Lambda LastModified value: %s", value)
-            return None

@@ -13,21 +13,21 @@ Required IAM permissions (least privilege):
 """
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from cfn_drift_extended.collectors._aws import BOTO_CONFIG
+from cfn_drift_extended.collectors._datetime_utils import (
+    days_since,
+    format_datetime,
+)
+from cfn_drift_extended.collectors.cfn_managed_index import ManagedIndex
 from cfn_drift_extended.collectors.orphan_filters import is_excluded_iam_role
 from cfn_drift_extended.models import OrphanFinding, OrphanType, Severity
 
 logger = logging.getLogger(__name__)
-
-_BOTO_CONFIG = Config(
-    retries={"max_attempts": 5, "mode": "adaptive"},
-)
 
 # Roles unused for longer than this are flagged as stale in the description.
 _STALE_THRESHOLD_DAYS = 90
@@ -44,15 +44,17 @@ class IamOrphanCollector:
     def __init__(self, session: boto3.Session, region: str) -> None:
         self._session = session
         self._region = region
-        self._iam = session.client("iam", config=_BOTO_CONFIG)
+        self._iam = session.client("iam", config=BOTO_CONFIG)
 
     def detect_orphaned_roles(
-        self, managed_index: frozenset[str]
+        self, managed_index: ManagedIndex | frozenset[str]
     ) -> list[OrphanFinding]:
         """Detect IAM roles not managed by any CloudFormation stack.
 
         Args:
-            managed_index: Set of physical resource IDs managed by CFN.
+            managed_index: ManagedIndex (or a plain set, for backward
+                compatibility with tests) of physical resource IDs managed
+                by CloudFormation.
 
         Returns:
             List of OrphanFinding for each orphaned role.
@@ -76,7 +78,7 @@ class IamOrphanCollector:
             if role_name in managed_index or role_arn in managed_index:
                 continue
 
-            created_date = self._format_datetime(role.get("CreateDate"))
+            created_date = format_datetime(role.get("CreateDate"))
             last_used, stale_days = self._extract_last_used(role)
 
             description = (
@@ -115,8 +117,9 @@ class IamOrphanCollector:
 
         return roles
 
+    @staticmethod
     def _extract_last_used(
-        self, role: dict[str, Any]
+        role: dict[str, Any],
     ) -> tuple[str | None, int | None]:
         """Extract the last-used ISO timestamp and days since last use.
 
@@ -128,25 +131,4 @@ class IamOrphanCollector:
         if not last_used_date:
             return None, None
 
-        last_used_iso = self._format_datetime(last_used_date)
-        days_since = self._days_since(last_used_date)
-        return last_used_iso, days_since
-
-    @staticmethod
-    def _format_datetime(value: datetime | str | None) -> str | None:
-        """Normalize a datetime (or ISO string) to an ISO 8601 string."""
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value.isoformat()
-        return str(value)
-
-    @staticmethod
-    def _days_since(value: datetime | None) -> int | None:
-        """Return whole days between ``value`` and now (UTC)."""
-        if not isinstance(value, datetime):
-            return None
-        now = datetime.now(UTC)
-        reference = value if value.tzinfo else value.replace(tzinfo=UTC)
-        delta = now - reference
-        return max(delta.days, 0)
+        return format_datetime(last_used_date), days_since(last_used_date)
