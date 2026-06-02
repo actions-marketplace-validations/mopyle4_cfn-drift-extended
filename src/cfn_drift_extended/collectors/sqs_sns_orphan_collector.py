@@ -9,6 +9,7 @@ Required IAM permissions (least privilege):
 - sns:ListTopics
 """
 
+import contextlib
 import logging
 from datetime import UTC, datetime
 
@@ -78,12 +79,10 @@ class SqsSnsOrphanCollector:
 
             created_date = None
             if created_timestamp:
-                try:
+                with contextlib.suppress(ValueError, OSError):
                     created_date = datetime.fromtimestamp(
                         int(created_timestamp), tz=UTC
                     ).isoformat()
-                except (ValueError, OSError):
-                    pass
 
             description = f"SQS queue '{queue_name}' is not managed by any CFN stack"
             if approx_messages:

@@ -28,10 +28,7 @@ def is_excluded_iam_role(role_name: str, role_path: str) -> bool:
         return True
 
     # Organization access role is created by AWS Organizations
-    if role_name == "OrganizationAccountAccessRole":
-        return True
-
-    return False
+    return role_name == "OrganizationAccountAccessRole"
 
 
 def is_excluded_security_group(
@@ -48,10 +45,7 @@ def is_excluded_security_group(
         return True
 
     # Default VPC's default group is always present
-    if default_vpc_id and vpc_id == default_vpc_id and sg_name == "default":
-        return True
-
-    return False
+    return bool(default_vpc_id and vpc_id == default_vpc_id and sg_name == "default")
 
 
 def is_excluded_lambda(function_name: str) -> bool:
@@ -66,10 +60,7 @@ def is_excluded_lambda(function_name: str) -> bool:
         return True
 
     # Log retention custom resource handlers
-    if "LogRetention" in function_name:
-        return True
-
-    return False
+    return "LogRetention" in function_name
 
 
 def is_excluded_queue(queue_url: str) -> bool:
@@ -87,7 +78,4 @@ def is_excluded_queue(queue_url: str) -> bool:
     if queue_name_lower.endswith("-dlq.fifo"):
         return True
 
-    if queue_name_lower.endswith("-deadletter.fifo"):
-        return True
-
-    return False
+    return queue_name_lower.endswith("-deadletter.fifo")
