@@ -100,14 +100,16 @@ def test_handles_list_stack_resources_errors_gracefully() -> None:
 
 
 @mock_aws
-def test_empty_stacks_returns_empty_set() -> None:
-    """Test that when no stacks exist, an empty set is returned."""
+def test_empty_stacks_returns_empty_index() -> None:
+    """Test that when no stacks exist, an empty index is returned."""
     session = boto3.Session(region_name="us-east-1")
     cfn = session.client("cloudformation")
 
     index = build_managed_resource_index(cfn)
 
-    assert index == frozenset()
+    assert len(index) == 0
+    assert "anything" not in index
+    assert index.active_stack_names == frozenset()
 
 
 @mock_aws

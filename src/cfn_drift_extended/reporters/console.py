@@ -112,6 +112,10 @@ class ConsoleReporter:
         click.secho(f"  [{severity_label}] ", fg=color, bold=True, nl=False)
         click.echo(f"{finding.resource_id} ({finding.resource_type})")
         click.echo(f"         {finding.description}")
+        provenance_label = finding.provenance.value
+        if finding.originating_stack_name:
+            provenance_label += f" (was in stack '{finding.originating_stack_name}')"
+        click.echo(f"         Provenance: {provenance_label}")
         if finding.created_date:
             click.echo(f"         Created: {finding.created_date}")
         if finding.last_used:

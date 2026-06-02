@@ -121,6 +121,33 @@ class OrphanType(StrEnum):
     SNS_TOPIC_ORPHANED = "sns_topic_orphaned"
 
 
+class Provenance(StrEnum):
+    """How the orphaned resource was originally provisioned.
+
+    Determined from the reserved ``aws:cloudformation:stack-name`` tag and the
+    state of the originating stack. The ``aws:`` prefix is server-enforced and
+    cannot be applied or modified by users, so the tag's presence is a
+    trustworthy signal that CloudFormation created the resource.
+    """
+
+    # Tag points to a stack whose status is DELETE_COMPLETE — the most
+    # actionable orphan: a Retain'd resource left behind by stack deletion.
+    CFN_ORPHAN_DELETED_STACK = "cfn_orphan_deleted_stack"
+
+    # Tag points to an active stack that the managed index missed. This means
+    # the index is incomplete (cross-region, prefix filter, etc.); surface as
+    # a tool warning rather than an orphan.
+    CFN_ORPHAN_ACTIVE_STACK = "cfn_orphan_active_stack"
+
+    # No CFN tag and the service reliably propagates the tag — the resource
+    # was almost certainly created via console/CLI/SDK directly.
+    NON_IAC = "non_iac"
+
+    # No CFN tag, but tag propagation for this resource type is unreliable
+    # (e.g., IAM principals not visible to RGT). Cannot conclude NON_IAC.
+    UNKNOWN = "unknown"
+
+
 class OrphanFinding(BaseModel, frozen=True):
     """A single orphaned resource finding.
 
@@ -139,6 +166,18 @@ class OrphanFinding(BaseModel, frozen=True):
         default=None, description="When the resource was last used"
     )
     region: str = Field(description="AWS region where the resource exists")
+    provenance: Provenance = Field(
+        default=Provenance.UNKNOWN,
+        description="How the resource was originally provisioned",
+    )
+    originating_stack_name: str | None = Field(
+        default=None,
+        description="Stack name from the aws:cloudformation:stack-name tag, if present",
+    )
+    stack_deleted_at: str | None = Field(
+        default=None,
+        description="Deletion time of the originating stack (DELETE_COMPLETE only)",
+    )
 
 
 class OrphanReport(BaseModel):

@@ -13,17 +13,14 @@ import logging
 from typing import Any
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from cfn_drift_extended.collectors._aws import BOTO_CONFIG
+from cfn_drift_extended.collectors.cfn_managed_index import ManagedIndex
 from cfn_drift_extended.collectors.orphan_filters import is_excluded_security_group
 from cfn_drift_extended.models import OrphanFinding, OrphanType, Severity
 
 logger = logging.getLogger(__name__)
-
-_BOTO_CONFIG = Config(
-    retries={"max_attempts": 5, "mode": "adaptive"},
-)
 
 
 class SgOrphanCollector:
@@ -37,15 +34,17 @@ class SgOrphanCollector:
     def __init__(self, session: boto3.Session, region: str) -> None:
         self._session = session
         self._region = region
-        self._ec2 = session.client("ec2", config=_BOTO_CONFIG)
+        self._ec2 = session.client("ec2", config=BOTO_CONFIG)
 
     def detect_orphaned_security_groups(
-        self, managed_index: frozenset[str]
+        self, managed_index: ManagedIndex | frozenset[str]
     ) -> list[OrphanFinding]:
         """Detect Security Groups not managed by any CloudFormation stack.
 
         Args:
-            managed_index: Set of physical resource IDs managed by CFN.
+            managed_index: ManagedIndex (or a plain set, for backward
+                compatibility with tests) of physical resource IDs managed
+                by CloudFormation.
 
         Returns:
             List of OrphanFinding for each orphaned security group.

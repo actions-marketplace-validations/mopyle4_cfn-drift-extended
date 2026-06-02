@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/Tests-203%20passing-brightgreen.svg)](#-development)
+[![Tests](https://img.shields.io/badge/Tests-249%20passing-brightgreen.svg)](#-development)
 [![AWS Services](https://img.shields.io/badge/AWS-IAM%20%7C%20SG%20%7C%20SNS%20%7C%20SQS%20%7C%20EventBridge%20%7C%20Lambda%20%7C%20S3%20%7C%20DynamoDB-orange.svg)](#-supported-services)
 [![CI/CD Ready](https://img.shields.io/badge/CI%2FCD-Ready-purple.svg)](#-github-action-usage)
 
@@ -127,11 +127,38 @@ cfn-drift-extended orphans --stack-prefix my-app --output-json orphans.json
 **Supported orphan detection services:** `iam`, `sg`, `lambda`, `sqs`, `sns`
 
 **Exclusion filters applied automatically:**
-- AWS service-linked roles (`/aws-service-role/`)
+- AWS service-linked roles (`/aws-service-role/`) and AWS-reserved roles (`/aws-reserved/`)
 - CDK bootstrap roles (name contains `cdk-`)
+- `OrganizationAccountAccessRole`
 - Default security groups (cannot be deleted)
 - CDK custom resource Lambda handlers (`LogRetention`, `Custom::`)
 - FIFO DLQ queues (`-dlq.fifo`, `-deadletter.fifo`)
+
+### Provenance classification
+
+Each orphan finding is classified by *how the resource came to exist*, so you can triage by cleanup priority instead of treating every leaked resource the same:
+
+| `provenance` | Meaning | Severity |
+|---|---|---|
+| `cfn_orphan_deleted_stack` | Resource was retained when its CloudFormation stack was deleted (`DeletionPolicy: Retain`). Most actionable — high-priority cleanup. | **HIGH** (always) |
+| `cfn_orphan_active_stack` | Resource appears tied to a still-active stack that the managed-index missed. Logged as a tool warning and *not* reported — usually a cross-region or stack-prefix gap. | n/a (skipped) |
+| `non_iac` | No CloudFormation record of the resource. Created via console / CLI / SDK directly. | service default |
+| `unknown` | Tag tier indicated nothing and the CFN API was unavailable; we won't claim NON_IAC without evidence. | service default |
+
+Provenance is resolved by two complementary signals:
+
+1. **Managed-index lookup** including `DELETE_COMPLETE` stacks within CloudFormation's ~90-day retention window. The authoritative source for the deleted-stack-residue case (resources whose status was `DELETE_SKIPPED`).
+2. **`cloudformation:DescribeStackResources --physical-resource-id`** as a fallback for active-stack resolution, plus a bulk `resourcegroupstaggingapi:GetResources` call for resource types where the reserved `aws:cloudformation:stack-name` tag does propagate (CloudWatch log groups, S3 buckets, SSM parameters — note that IAM roles, SQS queues, SG, Lambda, and SNS topics do *not* carry the reserved tag, verified empirically).
+
+`originating_stack_name` is populated on every CFN-orphan finding so you can trace each resource back to the stack that left it behind.
+
+### Live verification
+
+A comprehensive end-to-end harness lives at `scripts/live-provenance-test.sh`. It deploys a CFN stack with one Retain'd resource per supported service plus a CLI-only resource per service plus exclusion-filter fixtures, deletes the stack, and asserts every classification path. Refuses to run against profiles or roles that look like production. Always tears down on success, failure, or interrupt.
+
+```bash
+scripts/live-provenance-test.sh --profile dev-account --region us-east-1
+```
 
 ---
 
@@ -151,21 +178,31 @@ This tool uses **read-only** AWS API calls exclusively. No write operations are 
         "cloudformation:GetTemplate",
         "cloudformation:DescribeStacks",
         "cloudformation:DescribeStackResource",
+        "cloudformation:DescribeStackResources",
         "cloudformation:ListStackResources",
+        "tag:GetResources",
+        "iam:ListRoles",
         "iam:GetRole",
         "iam:GetRolePolicy",
+        "iam:ListRoleTags",
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
+        "ec2:DescribeVpcs",
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeSecurityGroupRules",
+        "sqs:ListQueues",
         "sqs:GetQueueAttributes",
+        "sqs:ListQueueTags",
+        "sns:ListTopics",
         "sns:GetTopicAttributes",
         "sns:ListSubscriptionsByTopic",
         "events:DescribeEventBus",
         "events:ListRules",
         "events:ListTargetsByRule",
+        "lambda:ListFunctions",
         "lambda:GetFunctionConfiguration",
         "lambda:GetPolicy",
+        "cloudwatch:GetMetricStatistics",
         "s3:GetBucketPolicy",
         "s3:GetBucketLifecycleConfiguration",
         "s3:GetBucketCors",
@@ -356,13 +393,12 @@ graph TD
 
 ```bash
 # Clone and install in dev mode
-git clone git@ssh.code.aws.dev:personal_projects/alias_m/mopyle/cfn-drift-extended.git
 cd cfn-drift-extended
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run tests (137 tests)
+# Run unit tests (249 tests, mocked AWS via moto)
 pytest --cov=cfn_drift_extended --cov-report=term-missing
 
 # Lint
@@ -371,12 +407,16 @@ ruff check src/ tests/
 # Type check
 mypy src/
 
-# Run integration tests (requires AWS credentials)
+# Run drift integration tests (requires AWS credentials)
 cd integration-tests
 ./deploy.sh
 ./introduce-drift.sh
 ./validate.sh
 ./cleanup.sh
+
+# Run orphan-detection live test (requires AWS credentials)
+# Refuses to run against profiles or roles that look like production.
+scripts/live-provenance-test.sh --profile dev-account --region us-east-1
 ```
 
 ---

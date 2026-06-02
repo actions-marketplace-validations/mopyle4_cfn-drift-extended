@@ -13,17 +13,14 @@ import logging
 from datetime import UTC, datetime
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from cfn_drift_extended.collectors._aws import BOTO_CONFIG
+from cfn_drift_extended.collectors.cfn_managed_index import ManagedIndex
 from cfn_drift_extended.collectors.orphan_filters import is_excluded_queue
 from cfn_drift_extended.models import OrphanFinding, OrphanType, Severity
 
 logger = logging.getLogger(__name__)
-
-_BOTO_CONFIG = Config(
-    retries={"max_attempts": 5, "mode": "adaptive"},
-)
 
 
 class SqsSnsOrphanCollector:
@@ -37,16 +34,18 @@ class SqsSnsOrphanCollector:
     def __init__(self, session: boto3.Session, region: str) -> None:
         self._session = session
         self._region = region
-        self._sqs = session.client("sqs", config=_BOTO_CONFIG)
-        self._sns = session.client("sns", config=_BOTO_CONFIG)
+        self._sqs = session.client("sqs", config=BOTO_CONFIG)
+        self._sns = session.client("sns", config=BOTO_CONFIG)
 
     def detect_orphaned_queues(
-        self, managed_index: frozenset[str]
+        self, managed_index: ManagedIndex | frozenset[str]
     ) -> list[OrphanFinding]:
         """Detect SQS queues not managed by any CloudFormation stack.
 
         Args:
-            managed_index: Set of physical resource IDs managed by CFN.
+            managed_index: ManagedIndex (or a plain set, for backward
+                compatibility with tests) of physical resource IDs managed
+                by CloudFormation.
 
         Returns:
             List of OrphanFinding for each orphaned queue.
@@ -106,12 +105,14 @@ class SqsSnsOrphanCollector:
         return findings
 
     def detect_orphaned_topics(
-        self, managed_index: frozenset[str]
+        self, managed_index: ManagedIndex | frozenset[str]
     ) -> list[OrphanFinding]:
         """Detect SNS topics not managed by any CloudFormation stack.
 
         Args:
-            managed_index: Set of physical resource IDs managed by CFN.
+            managed_index: ManagedIndex (or a plain set, for backward
+                compatibility with tests) of physical resource IDs managed
+                by CloudFormation.
 
         Returns:
             List of OrphanFinding for each orphaned topic.
