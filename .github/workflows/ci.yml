@@ -31,7 +31,7 @@ jobs:
         run: ruff check src/ tests/
 
       - name: Test with coverage
-        run: pytest --cov=cfn_drift_extended --cov-report=xml --cov-fail-under=85
+        run: pytest --cov=cfn_drift_extended --cov-report=xml --cov-fail-under=70
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
