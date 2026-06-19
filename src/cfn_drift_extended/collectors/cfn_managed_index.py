@@ -105,6 +105,7 @@ def build_managed_resource_index(
     stack_prefix: str = "",
     stack_names: list[str] | None = None,
     include_deleted_window_days: int | None = 90,
+    max_deleted_stacks: int | None = None,
 ) -> ManagedIndex:
     """Build a ``ManagedIndex`` of resources managed by CloudFormation.
 
@@ -116,6 +117,9 @@ def build_managed_resource_index(
             stacks in ``DELETE_COMPLETE`` status whose deletion time is within
             this many days. Defaults to 90 (matches CloudFormation's deleted
             stack metadata retention). Pass ``None`` to skip deleted stacks.
+        max_deleted_stacks: Maximum number of deleted stacks to enumerate
+            for the index. Caps the scan for accounts with thousands of
+            deleted stacks. Pass ``None`` for no limit. Defaults to None.
 
     Returns:
         A ``ManagedIndex`` containing all managed physical resource IDs.
@@ -132,6 +136,7 @@ def build_managed_resource_index(
         stack_names=stack_names,
         statuses=statuses_to_query,
         deleted_window_days=include_deleted_window_days,
+        max_deleted_stacks=max_deleted_stacks,
     )
 
     for key in discovered:
@@ -154,12 +159,26 @@ def build_managed_resource_index(
             )
 
     index = ManagedIndex(refs)
+    deleted_count = sum(
+        1 for k in discovered if k.status == _DELETED_STACK_STATUS
+    )
+    was_capped = (
+        max_deleted_stacks is not None and deleted_count >= max_deleted_stacks
+    )
+    if was_capped:
+        logger.warning(
+            "Deleted-stack scan capped at %d stacks (--max-deleted-stacks). "
+            "Some orphan provenance may be classified as UNKNOWN.",
+            max_deleted_stacks,
+        )
     logger.info(
         "Built managed resource index: %d resources across %d stacks "
-        "(deleted window: %s days)",
+        "(deleted window: %s days, deleted stacks scanned: %d%s)",
         len(index),
         len({r.stack_name for r in refs}),
         include_deleted_window_days,
+        deleted_count,
+        " [CAPPED]" if was_capped else "",
     )
     return index
 
@@ -185,6 +204,7 @@ def _discover_stacks(
     stack_names: list[str] | None,
     statuses: list[str],
     deleted_window_days: int | None,
+    max_deleted_stacks: int | None = None,
 ) -> list[_StackKey]:
     """Return identifiers for each stack to enumerate."""
     if stack_names:
@@ -198,6 +218,7 @@ def _discover_stacks(
         cutoff = datetime.now(UTC) - timedelta(days=deleted_window_days)
 
     discovered: list[_StackKey] = []
+    deleted_count = 0
     try:
         paginator = cfn_client.get_paginator("list_stacks")
         for page in paginator.paginate(StackStatusFilter=statuses):
@@ -225,6 +246,13 @@ def _discover_stacks(
                     if not stack_id:
                         # Cannot list resources without the StackId, skip.
                         continue
+                    # Enforce deleted-stack cap for scale
+                    if (
+                        max_deleted_stacks is not None
+                        and deleted_count >= max_deleted_stacks
+                    ):
+                        continue
+                    deleted_count += 1
                     discovered.append(
                         _StackKey(
                             name=name,

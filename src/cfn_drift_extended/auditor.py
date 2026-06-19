@@ -6,37 +6,27 @@ AWS interaction to collectors and all comparison logic to comparators.
 """
 
 import logging
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from typing import Any
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from cfn_drift_extended import __version__
-from cfn_drift_extended._auditor_utils import build_session, get_account_id
 from cfn_drift_extended.collectors.cfn_collector import CfnCollector, ExpectedRoleState
-from cfn_drift_extended.collectors.cfn_dynamodb_extractor import CfnDynamoDBExtractor
 from cfn_drift_extended.collectors.cfn_eventbridge_extractor import CfnEventBridgeExtractor
-from cfn_drift_extended.collectors.cfn_lambda_extractor import CfnLambdaExtractor
-from cfn_drift_extended.collectors.cfn_s3_extractor import CfnS3Extractor
 from cfn_drift_extended.collectors.cfn_sg_extractor import CfnSgExtractor
 from cfn_drift_extended.collectors.cfn_sns_sqs_extractor import CfnSnsSqsExtractor
-from cfn_drift_extended.collectors.dynamodb_collector import DynamoDBCollector
 from cfn_drift_extended.collectors.eventbridge_collector import EventBridgeCollector
 from cfn_drift_extended.collectors.iam_collector import IamCollector
-from cfn_drift_extended.collectors.lambda_collector import LambdaCollector
-from cfn_drift_extended.collectors.s3_collector import S3Collector
 from cfn_drift_extended.collectors.sg_collector import SgCollector
 from cfn_drift_extended.collectors.sns_sqs_collector import SnsSqsCollector
-from cfn_drift_extended.comparators.dynamodb_comparator import DynamoDBComparator
 from cfn_drift_extended.comparators.eventbridge_comparator import (
     EventBridgeComparator,
 )
 from cfn_drift_extended.comparators.iam_comparator import IamComparator
-from cfn_drift_extended.comparators.lambda_comparator import LambdaComparator
-from cfn_drift_extended.comparators.s3_comparator import S3Comparator
 from cfn_drift_extended.comparators.sg_comparator import SgComparator
 from cfn_drift_extended.comparators.sns_sqs_comparator import (
     SnsSqsComparator,
@@ -49,15 +39,12 @@ logger = logging.getLogger(__name__)
 # Default concurrency for parallel resource auditing
 _DEFAULT_MAX_WORKERS = 10
 
-# All supported service names
-ALL_SERVICES = frozenset({"iam", "sg", "sns", "sqs", "eventbridge", "lambda", "s3", "dynamodb"})
-
-
-# Paths that indicate AWS service-linked roles (not user-managed)
-_SERVICE_LINKED_ROLE_PREFIXES = (
-    "aws-service-role/",
-    "AWSServiceRoleFor",
+_BOTO_CONFIG = Config(
+    retries={"max_attempts": 5, "mode": "adaptive"},
 )
+
+# All supported service names
+ALL_SERVICES = frozenset({"iam", "sg", "sns", "sqs", "eventbridge"})
 
 
 class Auditor:
@@ -76,7 +63,12 @@ class Auditor:
         profile: str | None = None,
         services: frozenset[str] | None = None,
     ) -> None:
-        self._session = build_session(region, profile, session)
+        if profile and session is None:
+            self._session = boto3.Session(
+                region_name=region, profile_name=profile
+            )
+        else:
+            self._session = session or boto3.Session(region_name=region)
 
         self._region = region
         self._max_workers = max_workers
@@ -109,21 +101,6 @@ class Auditor:
             self._eventbridge_comparator = EventBridgeComparator()
             self._eventbridge_extractor = CfnEventBridgeExtractor()
 
-        if "lambda" in self._services:
-            self._lambda_collector = LambdaCollector(region=region, session=self._session)
-            self._lambda_comparator = LambdaComparator()
-            self._lambda_extractor = CfnLambdaExtractor()
-
-        if "s3" in self._services:
-            self._s3_collector = S3Collector(region=region, session=self._session)
-            self._s3_comparator = S3Comparator()
-            self._s3_extractor = CfnS3Extractor()
-
-        if "dynamodb" in self._services:
-            self._dynamodb_collector = DynamoDBCollector(region=region, session=self._session)
-            self._dynamodb_comparator = DynamoDBComparator()
-            self._dynamodb_extractor = CfnDynamoDBExtractor()
-
     def audit_stacks(
         self,
         stack_prefix: str = "",
@@ -150,7 +127,7 @@ class Auditor:
         )
 
         # Resolve account ID for report metadata
-        report.account_id = get_account_id(self._session)
+        report.account_id = self._get_account_id()
 
         # Discover stacks
         try:
@@ -213,9 +190,9 @@ class Auditor:
             errors.extend(iam_errors)
             resource_count += iam_count
 
-        # For SG, SNS/SQS, EventBridge, Lambda, S3, DynamoDB we need the template and physical IDs
+        # For SG, SNS/SQS, EventBridge we need the template and physical IDs
         needs_template = bool(
-            {"sg", "sns", "sqs", "eventbridge", "lambda", "s3", "dynamodb"} & self._services
+            {"sg", "sns", "sqs", "eventbridge"} & self._services
         )
         if not needs_template:
             return audits, errors, resource_count
@@ -267,33 +244,6 @@ class Auditor:
             errors.extend(eb_errors)
             resource_count += eb_count
 
-        # Lambda audit
-        if "lambda" in self._services:
-            lambda_audits, lambda_errors, lambda_count = self._audit_lambda(
-                resources, stack_name, physical_ids
-            )
-            audits.extend(lambda_audits)
-            errors.extend(lambda_errors)
-            resource_count += lambda_count
-
-        # S3 audit
-        if "s3" in self._services:
-            s3_audits, s3_errors, s3_count = self._audit_s3(
-                resources, stack_name, physical_ids
-            )
-            audits.extend(s3_audits)
-            errors.extend(s3_errors)
-            resource_count += s3_count
-
-        # DynamoDB audit
-        if "dynamodb" in self._services:
-            ddb_audits, ddb_errors, ddb_count = self._audit_dynamodb(
-                resources, stack_name, physical_ids
-            )
-            audits.extend(ddb_audits)
-            errors.extend(ddb_errors)
-            resource_count += ddb_count
-
         return audits, errors, resource_count
 
     def _audit_iam(
@@ -313,16 +263,39 @@ class Auditor:
         stack_name: str,
         physical_ids: dict[str, str],
     ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="SG",
-            id_attr="group_id",
-            extracted=self._sg_extractor.extract_security_groups(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._sg_collector.get_security_group_state,
-            compare=self._sg_comparator.compare,
-            stack_name=stack_name,
+        """Audit Security Groups for a stack."""
+        expected_sgs = self._sg_extractor.extract_security_groups(
+            resources, stack_name, physical_ids
         )
+        if not expected_sgs:
+            return [], [], 0
+
+        audits: list[ResourceAudit] = []
+        errors: list[str] = []
+
+        for expected in expected_sgs:
+            try:
+                actual = self._sg_collector.get_security_group_state(
+                    expected.group_id
+                )
+                if actual is None:
+                    logger.warning(
+                        "SG '%s' in stack '%s' not found — skipping",
+                        expected.group_id,
+                        stack_name,
+                    )
+                    continue
+                audit = self._sg_comparator.compare(expected, actual)
+                audits.append(audit)
+            except Exception as e:
+                msg = (
+                    f"Error auditing SG '{expected.group_id}' "
+                    f"in stack '{stack_name}': {e}"
+                )
+                logger.error(msg)
+                errors.append(msg)
+
+        return audits, errors, len(expected_sgs)
 
     def _audit_sqs(
         self,
@@ -330,17 +303,41 @@ class Auditor:
         stack_name: str,
         physical_ids: dict[str, str],
     ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="SQS queue",
-            id_attr="queue_url",
-            extracted=self._sns_sqs_extractor.extract_sqs_queues(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._sns_sqs_collector.get_queue_state,
-            compare=self._sns_sqs_comparator.compare_sqs,
-            stack_name=stack_name,
-            skip_when_id_missing=True,
+        """Audit SQS queues for a stack."""
+        expected_queues = self._sns_sqs_extractor.extract_sqs_queues(
+            resources, stack_name, physical_ids
         )
+        if not expected_queues:
+            return [], [], 0
+
+        audits: list[ResourceAudit] = []
+        errors: list[str] = []
+
+        for expected in expected_queues:
+            try:
+                if not expected.queue_url:
+                    continue
+                actual = self._sns_sqs_collector.get_queue_state(
+                    expected.queue_url
+                )
+                if actual is None:
+                    logger.warning(
+                        "SQS queue '%s' in stack '%s' not found — skipping",
+                        expected.queue_url,
+                        stack_name,
+                    )
+                    continue
+                audit = self._sns_sqs_comparator.compare_sqs(expected, actual)
+                audits.append(audit)
+            except Exception as e:
+                msg = (
+                    f"Error auditing SQS queue '{expected.queue_arn}' "
+                    f"in stack '{stack_name}': {e}"
+                )
+                logger.error(msg)
+                errors.append(msg)
+
+        return audits, errors, len(expected_queues)
 
     def _audit_sns(
         self,
@@ -348,17 +345,41 @@ class Auditor:
         stack_name: str,
         physical_ids: dict[str, str],
     ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="SNS topic",
-            id_attr="topic_arn",
-            extracted=self._sns_sqs_extractor.extract_sns_topics(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._sns_sqs_collector.get_topic_state,
-            compare=self._sns_sqs_comparator.compare_sns,
-            stack_name=stack_name,
-            skip_when_id_missing=True,
+        """Audit SNS topics for a stack."""
+        expected_topics = self._sns_sqs_extractor.extract_sns_topics(
+            resources, stack_name, physical_ids
         )
+        if not expected_topics:
+            return [], [], 0
+
+        audits: list[ResourceAudit] = []
+        errors: list[str] = []
+
+        for expected in expected_topics:
+            try:
+                if not expected.topic_arn:
+                    continue
+                actual = self._sns_sqs_collector.get_topic_state(
+                    expected.topic_arn
+                )
+                if actual is None:
+                    logger.warning(
+                        "SNS topic '%s' in stack '%s' not found — skipping",
+                        expected.topic_arn,
+                        stack_name,
+                    )
+                    continue
+                audit = self._sns_sqs_comparator.compare_sns(expected, actual)
+                audits.append(audit)
+            except Exception as e:
+                msg = (
+                    f"Error auditing SNS topic '{expected.topic_arn}' "
+                    f"in stack '{stack_name}': {e}"
+                )
+                logger.error(msg)
+                errors.append(msg)
+
+        return audits, errors, len(expected_topics)
 
     def _audit_eventbridge(
         self,
@@ -366,117 +387,39 @@ class Auditor:
         stack_name: str,
         physical_ids: dict[str, str],
     ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="event bus",
-            id_attr="event_bus_name",
-            extracted=self._eventbridge_extractor.extract_event_buses(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._eventbridge_collector.get_event_bus_state,
-            compare=self._eventbridge_comparator.compare,
-            stack_name=stack_name,
+        """Audit EventBridge rules for a stack."""
+        expected_buses = self._eventbridge_extractor.extract_event_buses(
+            resources, stack_name, physical_ids
         )
-
-    def _audit_lambda(
-        self,
-        resources: dict[str, Any],
-        stack_name: str,
-        physical_ids: dict[str, str],
-    ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="Lambda function",
-            id_attr="function_name",
-            extracted=self._lambda_extractor.extract_functions(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._lambda_collector.get_function_state,
-            compare=self._lambda_comparator.compare,
-            stack_name=stack_name,
-        )
-
-    def _audit_s3(
-        self,
-        resources: dict[str, Any],
-        stack_name: str,
-        physical_ids: dict[str, str],
-    ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="S3 bucket",
-            id_attr="bucket_name",
-            extracted=self._s3_extractor.extract_buckets(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._s3_collector.get_bucket_state,
-            compare=self._s3_comparator.compare,
-            stack_name=stack_name,
-        )
-
-    def _audit_dynamodb(
-        self,
-        resources: dict[str, Any],
-        stack_name: str,
-        physical_ids: dict[str, str],
-    ) -> tuple[list[ResourceAudit], list[str], int]:
-        return self._audit_resource_set(
-            label="DynamoDB table",
-            id_attr="table_name",
-            extracted=self._dynamodb_extractor.extract_tables(
-                resources, stack_name, physical_ids
-            ),
-            fetch_actual=self._dynamodb_collector.get_table_state,
-            compare=self._dynamodb_comparator.compare,
-            stack_name=stack_name,
-        )
-
-    @staticmethod
-    def _audit_resource_set(
-        *,
-        label: str,
-        id_attr: str,
-        extracted: list[Any],
-        fetch_actual: Callable[[str], Any],
-        compare: Callable[[Any, Any], ResourceAudit],
-        stack_name: str,
-        skip_when_id_missing: bool = False,
-    ) -> tuple[list[ResourceAudit], list[str], int]:
-        """Run the per-service audit loop shared by every non-IAM service.
-
-        Each enabled service follows the same shape: a CFN extractor returns
-        an "expected" list, a service collector fetches the live state by id,
-        and a comparator produces the ResourceAudit. The variation between
-        services is fully captured by ``label``, ``id_attr``, and the three
-        callables — the loop body itself is identical.
-        """
-        if not extracted:
+        if not expected_buses:
             return [], [], 0
 
         audits: list[ResourceAudit] = []
         errors: list[str] = []
 
-        for expected in extracted:
-            identifier = getattr(expected, id_attr, None)
+        for expected in expected_buses:
             try:
-                if skip_when_id_missing and not identifier:
-                    continue
-                actual = fetch_actual(identifier)
+                actual = self._eventbridge_collector.get_event_bus_state(
+                    expected.event_bus_name
+                )
                 if actual is None:
                     logger.warning(
-                        "%s '%s' in stack '%s' not found — skipping",
-                        label,
-                        identifier,
+                        "Event bus '%s' in stack '%s' not found — skipping",
+                        expected.event_bus_name,
                         stack_name,
                     )
                     continue
-                audits.append(compare(expected, actual))
+                audit = self._eventbridge_comparator.compare(expected, actual)
+                audits.append(audit)
             except Exception as e:
                 msg = (
-                    f"Error auditing {label} '{identifier}' "
+                    f"Error auditing event bus '{expected.event_bus_name}' "
                     f"in stack '{stack_name}': {e}"
                 )
                 logger.error(msg)
                 errors.append(msg)
 
-        return audits, errors, len(extracted)
+        return audits, errors, len(expected_buses)
 
     def _resolve_physical_ids(
         self, stack_name: str, resources: dict[str, Any]
@@ -507,7 +450,7 @@ class Auditor:
         # Add pseudo-parameters for Fn::Sub resolution
         physical_ids["AWS::Region"] = self._region
         physical_ids["AWS::StackName"] = stack_name
-        physical_ids["AWS::AccountId"] = get_account_id(self._session)
+        physical_ids["AWS::AccountId"] = self._get_account_id()
         physical_ids["AWS::URLSuffix"] = "amazonaws.com"
         physical_ids["AWS::Partition"] = "aws"
 
@@ -550,22 +493,7 @@ class Auditor:
         return audits, errors
 
     def _audit_single_role(self, expected: ExpectedRoleState) -> ResourceAudit | None:
-        """Audit a single IAM role against its expected state.
-
-        Skips service-linked roles (created by AWS services, not user-managed).
-        """
-        # Skip service-linked roles — they're AWS-managed, not user drift
-        if any(
-            expected.role_name.startswith(prefix)
-            for prefix in _SERVICE_LINKED_ROLE_PREFIXES
-        ):
-            logger.debug(
-                "Skipping service-linked role '%s' in stack '%s'",
-                expected.role_name,
-                expected.stack_name,
-            )
-            return None
-
+        """Audit a single IAM role against its expected state."""
         actual = self._iam_collector.get_role_state(expected.role_name)
         if actual is None:
             logger.warning(
@@ -576,3 +504,12 @@ class Auditor:
             return None
 
         return self._iam_comparator.compare(expected, actual)
+
+    def _get_account_id(self) -> str:
+        """Get the AWS account ID for report metadata."""
+        try:
+            sts = self._session.client("sts", config=_BOTO_CONFIG)
+            return sts.get_caller_identity()["Account"]
+        except Exception:
+            logger.debug("Could not determine account ID")
+            return "unknown"

@@ -62,7 +62,7 @@ def test_detect_orphans_runs_new_detectors() -> None:
 
 @mock_aws
 def test_sqs_orphan_with_no_cfn_tag_classified_as_non_iac() -> None:
-    """A queue with no aws:cloudformation:stack-name tag is NON_IAC."""
+    """A queue with no aws:cloudformation:stack-name tag is UNKNOWN."""
     session = boto3.Session(region_name="us-east-1")
     sqs = session.client("sqs")
     sqs.create_queue(QueueName="cli-created-queue")
@@ -76,7 +76,7 @@ def test_sqs_orphan_with_no_cfn_tag_classified_as_non_iac() -> None:
         f for f in report.findings if f.resource_type == "AWS::SQS::Queue"
     ]
     assert len(sqs_findings) == 1
-    assert sqs_findings[0].provenance == Provenance.NON_IAC
+    assert sqs_findings[0].provenance == Provenance.UNKNOWN
     assert sqs_findings[0].originating_stack_name is None
 
 
@@ -165,7 +165,7 @@ def test_iam_orphan_resolved_via_describe_stack_resources() -> None:
 
 @mock_aws
 def test_iam_orphan_with_no_cfn_record_classified_as_non_iac() -> None:
-    """A role unknown to CloudFormation is NON_IAC."""
+    """A role unknown to CloudFormation is UNKNOWN."""
     session = boto3.Session(region_name="us-east-1")
     iam = session.client("iam")
     iam.create_role(RoleName="loose-role", AssumeRolePolicyDocument="{}")
@@ -179,5 +179,5 @@ def test_iam_orphan_with_no_cfn_record_classified_as_non_iac() -> None:
         f for f in report.findings if f.resource_type == "AWS::IAM::Role"
     ]
     assert len(iam_findings) == 1
-    assert iam_findings[0].provenance == Provenance.NON_IAC
+    assert iam_findings[0].provenance == Provenance.UNKNOWN
     assert iam_findings[0].originating_stack_name is None

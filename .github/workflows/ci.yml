@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -31,7 +30,7 @@ jobs:
         run: ruff check src/ tests/
 
       - name: Test with coverage
-        run: pytest --cov=cfn_drift_extended --cov-report=xml --cov-fail-under=70
+        run: pytest --cov=cfn_drift_extended --cov-report=xml --cov-fail-under=85
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'

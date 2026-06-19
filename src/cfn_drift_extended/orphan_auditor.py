@@ -56,11 +56,15 @@ class OrphanAuditor:
         profile: str | None = None,
         services: frozenset[str] | None = None,
         max_workers: int = _DEFAULT_MAX_WORKERS,
+        max_deleted_stacks: int | None = None,
+        max_cfn_workers: int = 5,
     ) -> None:
         self._session = build_session(region, profile)
         self._region = region
         self._max_workers = max_workers
         self._services = services or ALL_ORPHAN_SERVICES
+        self._max_deleted_stacks = max_deleted_stacks
+        self._max_cfn_workers = max_cfn_workers
 
     def detect_orphans(
         self,
@@ -91,6 +95,7 @@ class OrphanAuditor:
             cfn_client,
             stack_prefix=stack_prefix,
             stack_names=stack_names,
+            max_deleted_stacks=self._max_deleted_stacks,
         )
 
         # Two-tier provenance resolver: bulk tag prefetch + per-resource
@@ -98,7 +103,9 @@ class OrphanAuditor:
         # aws:cloudformation:stack-name tag does not propagate to all
         # resource types (verified empirically for IAM/SQS/SG/Lambda),
         # so the tag tier alone is insufficient.
-        resolver = ProvenanceResolver(self._session, self._region)
+        resolver = ProvenanceResolver(
+            self._session, self._region, max_workers=self._max_cfn_workers
+        )
         resolver.prefetch_tagged_resources()
 
         # Run orphan detectors in parallel
@@ -201,7 +208,7 @@ class OrphanAuditor:
                 originating_stack = owner.stack_name
                 severity = Severity.HIGH
             else:
-                provenance = Provenance.NON_IAC
+                provenance = Provenance.UNKNOWN
 
             classified.append(
                 finding.model_copy(

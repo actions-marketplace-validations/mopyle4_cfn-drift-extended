@@ -1,67 +1,42 @@
-# 🛡️ cfn-drift-extended
+# cfn-drift-extended
+
+Detect **additive drift** and **orphaned resources** in CloudFormation-managed AWS accounts that native drift detection misses.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/Tests-249%20passing-brightgreen.svg)](#-development)
-[![AWS Services](https://img.shields.io/badge/AWS-IAM%20%7C%20SG%20%7C%20SNS%20%7C%20SQS%20%7C%20EventBridge%20%7C%20Lambda%20%7C%20S3%20%7C%20DynamoDB-orange.svg)](#-supported-services)
-[![CI/CD Ready](https://img.shields.io/badge/CI%2FCD-Ready-purple.svg)](#-github-action-usage)
-
-Detect **additive drift** in CloudFormation-managed resources that native drift detection misses.
-
----
-
-## 📋 Table of Contents
-
-- [The Problem](#-the-problem)
-- [Supported Services](#-supported-services)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Orphaned Resource Detection](#-orphaned-resource-detection)
-- [IAM Permissions](#-required-iam-permissions-least-privilege)
-- [Exit Codes](#-exit-codes)
-- [Example Output](#-example-output)
-- [JSON Report Format](#-json-report-format)
-- [GitHub Action](#-github-action-usage)
-- [Architecture](#-architecture)
-- [Design Principles](#-design-principles)
-- [Performance](#-performance-characteristics)
-- [Troubleshooting](#-troubleshooting)
-- [Development](#-development)
-- [Contributing](#-contributing)
-- [License](#-license)
-
----
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/Tests-242%20passing-brightgreen.svg)](#-development)
+[![PyPI](https://img.shields.io/badge/PyPI-v1.1.0-blue.svg)](https://pypi.org/project/cfn-drift-extended/)
 
 ## 🔍 The Problem
 
-CloudFormation drift detection only catches modifications or deletions to resources it manages. It completely misses **additive changes** — for example:
+CloudFormation drift detection only catches modifications or deletions to resources it manages. It completely misses **additive changes** — for example, a manually attached IAM policy on a CDK-managed role, an extra security group ingress rule, or an unauthorized SNS subscription. This tool fills that gap.
 
-- 🔓 A manually attached IAM policy on a CDK-managed role
-- 🌐 An extra security group ingress rule opening SSH to the world
-- 📨 An unauthorized SNS subscription exfiltrating data
-- 📋 An extra SQS policy statement granting public access
-- ⚡ A rogue EventBridge rule routing events to unintended targets
-
-**CloudFormation says "IN_SYNC" for all of these.** This tool catches them.
-
-> **Real-world example:** A reconciliation job failed in QA but worked in Dev. Root cause: someone had manually attached a broader IAM policy to the orchestrator role in Dev. CloudFormation showed "IN_SYNC" because the manual addition wasn't a modification — it was an extra policy CFN didn't know about.
-
----
+**Real-world example:** A reconciliation job failed in QA but worked in Dev. Root cause: someone had manually attached a broader IAM policy to the orchestrator role in Dev. CloudFormation showed "IN_SYNC" because the manual addition wasn't a modification — it was an extra policy CFN didn't know about.
 
 ## 🎯 Supported Services
 
+### Additive drift detection (`audit`)
+
 | Service | Drift Detected | Severity |
 |---------|---------------|----------|
-| 🔐 **IAM Roles** | Extra inline policies, extra managed policies, modified policy documents | HIGH |
-| 🌐 **Security Groups** | Extra ingress rules (attack surface), extra egress rules (exfiltration) | HIGH / MEDIUM |
-| 📨 **SNS Topics** | Extra policy statements, extra subscriptions | HIGH / MEDIUM |
-| 📋 **SQS Queues** | Extra resource policy statements | HIGH |
-| ⚡ **EventBridge** | Extra rules on CFN-managed event buses | MEDIUM |
-| 🔧 **Lambda** | Extra environment variables, extra layers, extra resource-based permissions | HIGH / MEDIUM |
-| 🪣 **S3** | Extra bucket policy statements, extra lifecycle rules, extra CORS rules | HIGH / MEDIUM / LOW |
-| 🗄️ **DynamoDB** | Extra Global Secondary Indexes, extra auto-scaling targets/policies | MEDIUM |
+| **IAM Roles** | Extra inline policies, extra managed policies, modified policy documents | HIGH |
+| **Security Groups** | Extra ingress rules (attack surface), extra egress rules (exfiltration) | HIGH / MEDIUM |
+| **SNS Topics** | Extra policy statements, extra subscriptions | HIGH / MEDIUM |
+| **SQS Queues** | Extra resource policy statements | HIGH |
+| **EventBridge** | Extra rules on CFN-managed event buses | MEDIUM |
+| **Lambda** | Extra environment variables, extra layers, extra resource policies | MEDIUM |
+| **S3** | Extra bucket policy statements, extra lifecycle rules, extra CORS rules | MEDIUM |
+| **DynamoDB** | Extra GSIs, extra scaling targets, extra scaling policies | MEDIUM |
 
----
+### Orphan detection (`orphans`)
+
+| Service | What It Detects | Severity |
+|---------|----------------|----------|
+| **IAM Roles** | Roles not managed by any active CFN stack | HIGH |
+| **Security Groups** | SGs not managed by any active CFN stack | MEDIUM |
+| **Lambda Functions** | Functions not managed by any active CFN stack | MEDIUM |
+| **SQS Queues** | Queues not managed by any active CFN stack | MEDIUM |
+| **SNS Topics** | Topics not managed by any active CFN stack | MEDIUM |
 
 ## 📦 Installation
 
@@ -70,8 +45,6 @@ pip install cfn-drift-extended
 ```
 
 **Requirements:** Python 3.11+
-
----
 
 ## 🚀 Quick Start
 
@@ -91,76 +64,57 @@ cfn-drift-extended audit --stack-prefix my-app --output-json report.json
 # Don't fail on drift (just report)
 cfn-drift-extended audit --stack-prefix my-app --no-fail-on-drift
 
-# Audit only specific services
-cfn-drift-extended audit --stack-prefix my-app --services iam,sg
-
 # Verbose mode for debugging
 cfn-drift-extended audit --stack-prefix my-app -v
 
 # Control concurrency (default: 10 parallel workers)
 cfn-drift-extended audit --stack-prefix my-app --max-workers 5
+
+# Audit only specific services
+cfn-drift-extended audit --stack-prefix my-app --services iam,sg
+
+# Audit only SNS/SQS and EventBridge
+cfn-drift-extended audit --stack-prefix my-app --services sns,sqs,eventbridge
 ```
 
----
+## 🔎 Orphan Detection (v1.1)
 
-## 🔎 Orphaned Resource Detection
-
-Detect resources that exist in your account but aren't managed by any CloudFormation stack — manually created resources that were never cleaned up.
+Detect resources that exist in your AWS account but aren't managed by any CloudFormation stack — leaked resources from deleted stacks, console-created resources never brought under IaC, or resources created during incidents and forgotten.
 
 ```bash
 # Detect orphaned resources across all services
 cfn-drift-extended orphans --region us-east-1
 
-# Scope the managed index to specific stacks
+# Scope to stacks with a specific prefix
 cfn-drift-extended orphans --stack-prefix my-app --region us-east-1
 
+# Cap deleted-stack scan for large accounts (default: 200)
+cfn-drift-extended orphans --stack-prefix my-app --max-deleted-stacks 500
+
+# Separate CFN API concurrency to avoid throttling (default: 5)
+cfn-drift-extended orphans --stack-prefix my-app --max-cfn-workers 3
+
 # Scan only specific services
-cfn-drift-extended orphans --services sqs,sns --region us-east-1
+cfn-drift-extended orphans --services iam,sg,lambda --region us-east-1
 
-# Fail in CI if orphans found
-cfn-drift-extended orphans --stack-prefix my-app --fail-on-orphans
-
-# Write JSON report
+# JSON output for CI/CD
 cfn-drift-extended orphans --stack-prefix my-app --output-json orphans.json
 ```
 
-**Supported orphan detection services:** `iam`, `sg`, `lambda`, `sqs`, `sns`
+### Orphan provenance classification
 
-**Exclusion filters applied automatically:**
-- AWS service-linked roles (`/aws-service-role/`) and AWS-reserved roles (`/aws-reserved/`)
-- CDK bootstrap roles (name contains `cdk-`)
-- `OrganizationAccountAccessRole`
-- Default security groups (cannot be deleted)
-- CDK custom resource Lambda handlers (`LogRetention`, `Custom::`)
-- FIFO DLQ queues (`-dlq.fifo`, `-deadletter.fifo`)
+Each orphan is classified by origin:
 
-### Provenance classification
+| Provenance | Meaning | Severity |
+|------------|---------|----------|
+| `cfn_orphan_deleted_stack` | Created by CFN, stack since deleted (DeletionPolicy: Retain) | HIGH |
+| `unknown` | CloudFormation has no record — could be non-IaC or scan was capped | MEDIUM |
 
-Each orphan finding is classified by *how the resource came to exist*, so you can triage by cleanup priority instead of treating every leaked resource the same:
+### Scale optimization (v1.1)
 
-| `provenance` | Meaning | Severity |
-|---|---|---|
-| `cfn_orphan_deleted_stack` | Resource was retained when its CloudFormation stack was deleted (`DeletionPolicy: Retain`). Most actionable — high-priority cleanup. | **HIGH** (always) |
-| `cfn_orphan_active_stack` | Resource appears tied to a still-active stack that the managed-index missed. Logged as a tool warning and *not* reported — usually a cross-region or stack-prefix gap. | n/a (skipped) |
-| `non_iac` | No CloudFormation record of the resource. Created via console / CLI / SDK directly. | service default |
-| `unknown` | Tag tier indicated nothing and the CFN API was unavailable; we won't claim NON_IAC without evidence. | service default |
+For accounts with thousands of deleted stacks, the `--max-deleted-stacks` flag (default: 200) caps the deleted-stack provenance scan. This prevents API throttling while still resolving provenance for the most recently deleted stacks. Unresolved orphans are classified as `unknown` rather than silently misclassified.
 
-Provenance is resolved by two complementary signals:
-
-1. **Managed-index lookup** including `DELETE_COMPLETE` stacks within CloudFormation's ~90-day retention window. The authoritative source for the deleted-stack-residue case (resources whose status was `DELETE_SKIPPED`).
-2. **`cloudformation:DescribeStackResources --physical-resource-id`** as a fallback for active-stack resolution, plus a bulk `resourcegroupstaggingapi:GetResources` call for resource types where the reserved `aws:cloudformation:stack-name` tag does propagate (CloudWatch log groups, S3 buckets, SSM parameters — note that IAM roles, SQS queues, SG, Lambda, and SNS topics do *not* carry the reserved tag, verified empirically).
-
-`originating_stack_name` is populated on every CFN-orphan finding so you can trace each resource back to the stack that left it behind.
-
-### Live verification
-
-A comprehensive end-to-end harness lives at `scripts/live-provenance-test.sh`. It deploys a CFN stack with one Retain'd resource per supported service plus a CLI-only resource per service plus exclusion-filter fixtures, deletes the stack, and asserts every classification path. Refuses to run against profiles or roles that look like production. Always tears down on success, failure, or interrupt.
-
-```bash
-scripts/live-provenance-test.sh --profile dev-account --region us-east-1
-```
-
----
+The `--max-cfn-workers` flag (default: 5) controls separate concurrency for CloudFormation API calls, independent from the detector thread pool (`--max-workers`).
 
 ## 🔒 Required IAM Permissions (Least Privilege)
 
@@ -178,38 +132,27 @@ This tool uses **read-only** AWS API calls exclusively. No write operations are 
         "cloudformation:GetTemplate",
         "cloudformation:DescribeStacks",
         "cloudformation:DescribeStackResource",
-        "cloudformation:DescribeStackResources",
         "cloudformation:ListStackResources",
-        "tag:GetResources",
-        "iam:ListRoles",
         "iam:GetRole",
         "iam:GetRolePolicy",
-        "iam:ListRoleTags",
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
-        "ec2:DescribeVpcs",
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeSecurityGroupRules",
-        "sqs:ListQueues",
         "sqs:GetQueueAttributes",
-        "sqs:ListQueueTags",
-        "sns:ListTopics",
         "sns:GetTopicAttributes",
         "sns:ListSubscriptionsByTopic",
         "events:DescribeEventBus",
         "events:ListRules",
         "events:ListTargetsByRule",
+        "sts:GetCallerIdentity",
+        "tag:GetResources",
+        "iam:ListRoles",
         "lambda:ListFunctions",
-        "lambda:GetFunctionConfiguration",
         "lambda:GetPolicy",
-        "cloudwatch:GetMetricStatistics",
-        "s3:GetBucketPolicy",
-        "s3:GetBucketLifecycleConfiguration",
-        "s3:GetBucketCors",
-        "dynamodb:DescribeTable",
-        "application-autoscaling:DescribeScalableTargets",
-        "application-autoscaling:DescribeScalingPolicies",
-        "sts:GetCallerIdentity"
+        "ec2:DescribeVpcs",
+        "sqs:ListQueues",
+        "sns:ListTopics"
       ],
       "Resource": "*"
     }
@@ -217,58 +160,44 @@ This tool uses **read-only** AWS API calls exclusively. No write operations are 
 }
 ```
 
-> 💡 For tighter scoping, restrict `Resource` to specific stack ARNs, role ARNs, security group IDs, queue ARNs, topic ARNs, and event bus ARNs.
+For tighter scoping, restrict `Resource` to specific stack ARNs, role ARNs, security group IDs, queue ARNs, topic ARNs, and event bus ARNs.
 
----
+## ⚙️ Exit Codes
 
-## 📊 Exit Codes
+| Code | Command | Meaning |
+|------|---------|---------|
+| 0 | `audit` | No drift detected (or `--no-fail-on-drift` used) |
+| 1 | `audit` | Additive drift detected |
+| 0 | `orphans` | No orphans found |
+| 1 | `orphans` | Orphaned resources detected |
+| 2 | Both | Error (permission denied, invalid input, unexpected failure) |
 
-| Code | Meaning |
-|------|---------|
-| `0` | ✅ No drift detected (or `--no-fail-on-drift` used) |
-| `1` | ⚠️ Additive drift detected |
-| `2` | ❌ Error (permission denied, invalid input, unexpected failure) |
-
----
-
-## 📝 Example Output
+## 🚀 Example Output
 
 ```
 ════════════════════════════════════════════════════════════════
   cfn-drift-extended — Additive Drift Report
 ════════════════════════════════════════════════════════════════
   Stacks scanned:    2
-  Resources scanned: 9
-  Resources drifted: 7
+  Resources scanned: 5
+  Resources drifted: 1
 
-⚠ Found 10 drift finding(s) across 7 resource(s):
+⚠ Found 1 drift finding(s) across 1 resource(s):
 
-  [HIGH] my-orchestrator-role (my-app-stack)
+  [HIGH] tax-reconciliation-tool-orchestrator (tax-reconciliation-tool-dev)
          Managed policy 'arn:aws:iam::123456789012:policy/ManualBroadAccess'
          is attached to role but is not declared in the CloudFormation template
          + arn:aws:iam::123456789012:policy/ManualBroadAccess
-
-  [HIGH] sg-0b7a2542ddb09edd6 (my-app-stack)
-         Ingress rule (tcp 22-22 0.0.0.0/0) exists on security group
-         but is not declared in the CloudFormation template
-         + ('tcp', 22, 22, '0.0.0.0/0', None, None, None)
-
-  [MEDIUM] my-event-bus (my-app-stack)
-         Rule 'sneaky-exfil-rule' exists on event bus but is not declared
-         in the CloudFormation template
-         + sneaky-exfil-rule
 ```
 
----
-
-## 📄 JSON Report Format
+## ⚙️ JSON Report Format
 
 ```json
 {
   "tool_version": "0.1.0",
   "account_id": "123456789012",
   "region": "us-east-1",
-  "timestamp": "2026-05-20T14:30:00+00:00",
+  "timestamp": "2026-05-19T14:30:00+00:00",
   "stacks_scanned": 3,
   "resources_scanned": 12,
   "resources_with_drift": 2,
@@ -289,116 +218,105 @@ This tool uses **read-only** AWS API calls exclusively. No write operations are 
 }
 ```
 
----
-
-## ⚙️ GitHub Action Usage
+## GitHub Action Usage
 
 ```yaml
-- uses: mopyle4/cfn-drift-extended@v0.1
+# Additive drift detection
+- uses: mopyle4/cfn-drift-extended@v1.1
   with:
+    command: "audit"
     stack-prefix: "my-app"
     region: "us-east-1"
-    services: "iam,sg,sns,sqs,eventbridge"  # optional, default: all
+    services: "iam,sg,sns,sqs,eventbridge"
     fail-on-drift: "true"
     output-json: "drift-report.json"
+
+# Orphan detection
+- uses: mopyle4/cfn-drift-extended@v1.1
+  with:
+    command: "orphans"
+    stack-prefix: "my-app"
+    region: "us-east-1"
+    max-deleted-stacks: "200"
+    output-json: "orphan-report.json"
 ```
-
-**Outputs:**
-- `drift-detected` — `true` or `false`
-- `findings-count` — number of drift findings
-
----
 
 ## 🏗️ Architecture
 
-```mermaid
-graph TD
-    CLI[🖥️ CLI - Click] --> Auditor[🎯 Auditor - Orchestrator]
-    Auditor --> CfnCollector[📋 CfnCollector - Expected State]
-    Auditor --> ServiceCollectors[🔍 Service Collectors - Actual State]
-    Auditor --> Comparators[⚖️ Comparators - Set Diff]
-    Auditor --> Reporters[📊 Reporters]
-
-    CfnCollector --> CfnSgExtractor[SG Extractor]
-    CfnCollector --> CfnSnsSqsExtractor[SNS/SQS Extractor]
-    CfnCollector --> CfnEventBridgeExtractor[EventBridge Extractor]
-
-    ServiceCollectors --> IamCollector[🔐 IAM Collector]
-    ServiceCollectors --> SgCollector[🌐 SG Collector]
-    ServiceCollectors --> SnsSqsCollector[📨 SNS/SQS Collector]
-    ServiceCollectors --> EventBridgeCollector[⚡ EventBridge Collector]
-
-    Comparators --> IamComparator[IAM Comparator]
-    Comparators --> SgComparator[SG Comparator]
-    Comparators --> SnsSqsComparator[SNS/SQS Comparator]
-    Comparators --> EventBridgeComparator[EventBridge Comparator]
-
-    Reporters --> Console[Console Report]
-    Reporters --> JSON[JSON Report]
-    Reporters --> GitHubChecks[GitHub Checks]
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│  CLI (Click)│────▶│   Auditor    │────▶│  Reporters  │
+└─────────────┘     └──────┬───────┘     └─────────────┘
+       │                   │
+       │          ┌────────┼────────┐
+       │          ▼        ▼        ▼
+       │   ┌──────────┐ ┌──────────┐ ┌───────────┐
+       │   │Collectors│ │Collectors│ │Comparators│
+       │   │(expected)│ │ (actual) │ │  (diff)   │
+       │   └──────────┘ └──────────┘ └───────────┘
+       │
+       ▼
+┌─────────────────┐     ┌──────────────────┐
+│ Orphan Auditor  │────▶│ Provenance       │
+│ (parallel detect│     │ Resolver         │
+│  per service)   │     │ (tag + CFN API)  │
+└────────┬────────┘     └──────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Managed Index   │ ← Active + deleted stacks (capped)
+│ (cfn_managed)   │
+└─────────────────┘
 ```
 
-| Component | Responsibility |
-|-----------|---------------|
-| **CLI** | Argument parsing, output formatting, exit codes |
-| **Auditor** | Orchestrates the pipeline with parallel execution |
-| **CfnCollector** | Extracts expected state from CloudFormation templates |
-| **Service Collectors** | Fetches actual state from AWS APIs (IAM, EC2, SQS, SNS, Events) |
-| **CfnExtractors** | Resolves intrinsics (Ref, GetAtt, Sub) in template resources |
-| **Comparators** | Diffs expected vs actual using set operations (O(n)) |
-| **Reporters** | Formats results for console, JSON, or GitHub Checks |
+- **Collectors** gather state (expected from CFN templates, actual from AWS APIs)
+- **Comparators** diff expected vs actual using set operations (O(n))
+- **Reporters** format results for different output targets (console, JSON, GitHub Checks)
+- **Auditor** orchestrates the pipeline with parallel execution
 
----
-
-## 🧠 Design Principles
+## ⚡ Design Principles
 
 | Principle | Implementation |
 |-----------|---------------|
-| 🔒 **Least Privilege** | Read-only API calls only; no write operations |
-| 📐 **SOLID** | Single responsibility per module; dependency injection via constructor |
-| 🧊 **Immutable Models** | Frozen Pydantic models and frozen dataclasses prevent mutation |
-| 🛟 **Graceful Degradation** | Individual resource failures don't crash the audit |
-| ⚡ **Performance** | Parallel auditing via ThreadPoolExecutor; set operations for O(n) comparison |
-| 🔄 **Adaptive Retry** | Exponential backoff with jitter (boto3 adaptive mode, 5 max attempts) |
-| 🏭 **CI/CD Ready** | Exit codes, JSON output, `--services` filter, and `--fail-on-drift` flag |
-
----
+| **Least Privilege** | Read-only API calls only; no write operations |
+| **SOLID** | Single responsibility per module; dependency injection via constructor |
+| **Immutable Models** | Frozen Pydantic models and frozen dataclasses prevent mutation |
+| **Graceful Degradation** | Individual resource failures don't crash the audit |
+| **Performance** | Parallel auditing via ThreadPoolExecutor; set operations for O(n) comparison |
+| **Adaptive Retry** | Exponential backoff with jitter (boto3 adaptive mode, 5 max attempts) |
+| **CI/CD Ready** | Exit codes, JSON output, and `--fail-on-drift` flag |
 
 ## ⚡ Performance Characteristics
 
-| Metric | Value |
-|--------|-------|
-| **Time complexity** | O(S × R) where S = stacks, R = resources per stack |
-| **Comparison** | O(n) set-based diff per resource |
-| **Concurrency** | Configurable thread pool (default 10 workers) |
-| **Memory** | Frozen dataclasses with `__slots__` (~40% less per instance) |
-| **Network** | Adaptive retry with exponential backoff prevents throttling |
-| **Validated** | 10 true findings, 0 false positives on live Isengard stack |
+- **Time complexity:** O(S × R) where S = stacks scanned, R = resources per stack
+- **Comparison:** O(n) set-based diff operations per resource
+- **Concurrency:** Configurable thread pool (default 10 workers) for parallel resource auditing
+- **Memory:** Frozen dataclasses with `__slots__` for minimal memory footprint
+- **Network:** Adaptive retry with exponential backoff prevents throttling
 
----
-
-## 🔧 Troubleshooting
+## 🛠️ Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Exit code 2 with "Permission denied" | Missing IAM permissions | Add the required permissions from the policy above |
 | No stacks found | Prefix doesn't match or stacks are in non-terminal state | Check stack names with `aws cloudformation list-stacks` |
-| Slow execution | Many resources across many stacks | Increase `--max-workers` or narrow `--stack-prefix` |
+| Slow execution | Many roles across many stacks | Increase `--max-workers` or narrow `--stack-prefix` |
 | False positives on CDK stacks | CDK generates `AWS::IAM::Policy` resources separately | Already handled — external policies are associated with their target roles |
-| Intrinsic resolution failures | Template uses complex Fn::Sub or nested intrinsics | File an issue — we handle Ref, GetAtt, and Sub but edge cases may exist |
+| Orphan provenance all "unknown" | `--max-deleted-stacks` too low for your account | Increase `--max-deleted-stacks` (default 200) |
+| CFN API throttling during orphans | Too many concurrent CFN calls | Decrease `--max-cfn-workers` (default 5) |
+| Many orphans from service-linked roles | AWS-managed roles show as orphans | Already filtered — service-linked and AWS-reserved roles are excluded |
 
----
-
-## 🛠️ Development
+## 🧪 Development
 
 ```bash
 # Clone and install in dev mode
+git clone https://github.com/mopyle4/cfn-drift-extended.git
 cd cfn-drift-extended
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run unit tests (249 tests, mocked AWS via moto)
+# Run tests (242 tests)
 pytest --cov=cfn_drift_extended --cov-report=term-missing
 
 # Lint
@@ -406,32 +324,11 @@ ruff check src/ tests/
 
 # Type check
 mypy src/
-
-# Run drift integration tests (requires AWS credentials)
-cd integration-tests
-./deploy.sh
-./introduce-drift.sh
-./validate.sh
-./cleanup.sh
-
-# Run orphan-detection live test (requires AWS credentials)
-# Refuses to run against profiles or roles that look like production.
-scripts/live-provenance-test.sh --profile dev-account --region us-east-1
 ```
-
----
 
 ## 🤝 Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Adding a new service collector:** Follow the pattern in the [design doc](docs/new-service-collectors-design.md). Each service needs:
-1. Collector (frozen dataclass + boto3 client class)
-2. CfnExtractor (template → expected state)
-3. Comparator (set-based diff → findings)
-4. Tests (happy path, drift detected, not found, permission denied, edge cases)
-
----
 
 ## 📄 License
 

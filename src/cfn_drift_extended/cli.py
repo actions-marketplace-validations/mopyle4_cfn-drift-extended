@@ -12,7 +12,6 @@ import click
 
 from cfn_drift_extended.auditor import ALL_SERVICES, Auditor
 from cfn_drift_extended.exceptions import AWSPermissionError, CfnDriftExtendedError
-from cfn_drift_extended.orphan_auditor import ALL_ORPHAN_SERVICES, OrphanAuditor
 from cfn_drift_extended.reporters.console import ConsoleReporter
 from cfn_drift_extended.reporters.json_report import JsonReporter
 
@@ -111,7 +110,7 @@ def main() -> None:
     default=None,
     help=(
         "Comma-separated list of services to audit. "
-        "Options: iam,sg,sns,sqs,eventbridge,lambda,s3,dynamodb. Default: all."
+        "Options: iam,sg,sns,sqs,eventbridge. Default: all."
     ),
 )
 def audit(
@@ -225,12 +224,7 @@ def audit(
     "--stack-prefix",
     default=None,
     callback=_validate_stack_prefix,
-    help="Only consider stacks with this prefix for the managed resource index.",
-)
-@click.option(
-    "--stack-name",
-    multiple=True,
-    help="Exact stack name(s) for the managed index. Can be specified multiple times.",
+    help="Only include stacks whose names start with this prefix in the index.",
 )
 @click.option(
     "--region",
@@ -251,12 +245,6 @@ def audit(
     help="Write JSON report to this file path.",
 )
 @click.option(
-    "--fail-on-orphans/--no-fail-on-orphans",
-    default=False,
-    show_default=True,
-    help="Exit with non-zero code if orphans are detected (useful for CI).",
-)
-@click.option(
     "--verbose", "-v",
     is_flag=True,
     default=False,
@@ -270,6 +258,27 @@ def audit(
     help="Maximum concurrent API calls for orphan detection.",
 )
 @click.option(
+    "--max-deleted-stacks",
+    type=click.IntRange(min=1),
+    default=200,
+    show_default=True,
+    help=(
+        "Maximum number of deleted stacks to scan for provenance. "
+        "Caps the scan for accounts with thousands of deleted stacks. "
+        "Use 0 or omit to scan all within the 90-day window."
+    ),
+)
+@click.option(
+    "--max-cfn-workers",
+    type=click.IntRange(min=1, max=20),
+    default=5,
+    show_default=True,
+    help=(
+        "Maximum concurrent CloudFormation API calls for provenance lookup. "
+        "Separate from --max-workers to avoid CFN API throttling."
+    ),
+)
+@click.option(
     "--services",
     default=None,
     help=(
@@ -279,16 +288,18 @@ def audit(
 )
 def orphans(
     stack_prefix: str | None,
-    stack_name: tuple[str, ...],
     region: str,
     profile: str | None,
     output_json: Path | None,
-    fail_on_orphans: bool,
     verbose: bool,
     max_workers: int,
+    max_deleted_stacks: int,
+    max_cfn_workers: int,
     services: str | None,
 ) -> None:
     """Detect orphaned resources not managed by any CloudFormation stack."""
+    from cfn_drift_extended.orphan_auditor import ALL_ORPHAN_SERVICES, OrphanAuditor
+
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
@@ -315,10 +326,11 @@ def orphans(
             profile=profile,
             services=enabled_services,
             max_workers=max_workers,
+            max_deleted_stacks=max_deleted_stacks if max_deleted_stacks > 0 else None,
+            max_cfn_workers=max_cfn_workers,
         )
         report = auditor.detect_orphans(
             stack_prefix=stack_prefix or "",
-            stack_names=list(stack_name) if stack_name else None,
         )
     except AWSPermissionError as e:
         click.secho(f"\n✗ Permission error: {e}", fg="red", err=True)
@@ -334,24 +346,47 @@ def orphans(
         logger.debug("Full traceback:", exc_info=True)
         sys.exit(2)
 
-    # Console output
-    console = ConsoleReporter()
-    console.render_orphans(report)
+    # Summary output
+    click.echo(f"\n{'='*60}")
+    click.echo(f"Orphan Detection Report — {region}")
+    click.echo(f"{'='*60}")
+    click.echo(f"Resources scanned: {report.resources_scanned}")
+    click.echo(f"Orphans found: {report.orphans_found}")
+
+    if report.findings:
+        click.echo(f"\n{'─'*60}")
+        for finding in report.findings:
+            provenance_label = f" [{finding.provenance}]" if finding.provenance else ""
+            origin = (
+                f" (from stack: {finding.originating_stack_name})"
+                if finding.originating_stack_name
+                else ""
+            )
+            click.secho(
+                f"  [{finding.severity.upper()}] {finding.resource_type}: "
+                f"{finding.resource_id}{provenance_label}{origin}",
+                fg="red" if finding.severity == "high" else "yellow",
+            )
+            click.echo(f"    {finding.description}")
+        click.echo(f"{'─'*60}")
 
     # JSON output
     if output_json:
-        json_reporter = JsonReporter()
-        json_reporter.render_orphans(report, output_path=output_json)
+        import json
+
+        output_json.write_text(
+            json.dumps(report.model_dump(mode="json"), indent=2)
+        )
         click.echo(f"\nJSON report written to: {output_json}")
 
     # Report non-fatal errors
     if report.errors:
         click.secho(
-            f"\n⚠ {len(report.errors)} non-fatal error(s) occurred during scan.",
+            f"\n⚠ {len(report.errors)} non-fatal error(s) occurred.",
             fg="yellow",
             err=True,
         )
 
-    # Exit code for CI/CD
-    if fail_on_orphans and report.has_orphans:
+    # Exit code: non-zero if orphans found
+    if report.orphans_found > 0:
         sys.exit(1)
