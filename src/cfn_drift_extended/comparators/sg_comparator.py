@@ -23,13 +23,30 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class ExpectedSecurityGroupState:
-    """What CloudFormation declares for a Security Group."""
+    """What CloudFormation declares for a Security Group.
+
+    ``declares_inline_egress`` is True when the template's SecurityGroup resource
+    specifies one or more rules in its inline ``SecurityGroupEgress`` property.
+    Only then does CloudFormation remove the EC2 default allow-all egress rule;
+    standalone ``AWS::EC2::SecurityGroupEgress`` resources leave it in place.
+    """
 
     group_id: str
     group_name: str
     stack_name: str
     ingress_rules: tuple[SecurityGroupRule, ...] = field(default_factory=tuple)
     egress_rules: tuple[SecurityGroupRule, ...] = field(default_factory=tuple)
+    declares_inline_egress: bool = False
+
+
+# EC2 adds allow-all outbound IPv4 and IPv6 rules to a new security group when no
+# egress rules are specified at creation (AWS::EC2::SecurityGroup documentation).
+_DEFAULT_EGRESS_KEYS = frozenset(
+    {
+        ("-1", None, None, "0.0.0.0/0", None, None, None),
+        ("-1", None, None, None, "::/0", None, None),
+    }
+)
 
 
 def _rule_key(rule: SecurityGroupRule) -> tuple:
@@ -115,8 +132,14 @@ class SgComparator:
     def _find_extra_egress(
         self, expected: ExpectedSecurityGroupState, actual: ActualSecurityGroupState
     ) -> list[DriftFinding]:
-        """Find egress rules that exist on the group but aren't in the CFN template."""
+        """Find egress rules that exist on the group but aren't in the CFN template.
+
+        When the template declares no inline SecurityGroupEgress, the EC2 default
+        allow-all egress rule is expected and is not reported.
+        """
         expected_keys = {_rule_key(r) for r in expected.egress_rules}
+        if not expected.declares_inline_egress:
+            expected_keys |= _DEFAULT_EGRESS_KEYS
         extra_rules = [r for r in actual.egress_rules if _rule_key(r) not in expected_keys]
 
         findings: list[DriftFinding] = []

@@ -63,9 +63,11 @@ class CfnSgExtractor:
             ingress_rules = self._extract_inline_rules(
                 properties.get("SecurityGroupIngress", [])
             )
-            egress_rules = self._extract_inline_rules(
-                properties.get("SecurityGroupEgress", [])
-            )
+            inline_egress = properties.get("SecurityGroupEgress", [])
+            egress_rules = self._extract_inline_rules(inline_egress)
+            # Any non-empty value (a rule list or an unresolved intrinsic) counts as
+            # declared, so the default egress rule is reported conservatively.
+            declares_inline_egress = bool(inline_egress)
 
             # Merge standalone rules that reference this group
             ingress_rules.extend(standalone_ingress.get(logical_id, []))
@@ -80,6 +82,7 @@ class CfnSgExtractor:
                     stack_name=stack_name,
                     ingress_rules=tuple(ingress_rules),
                     egress_rules=tuple(egress_rules),
+                    declares_inline_egress=declares_inline_egress,
                 )
             )
 

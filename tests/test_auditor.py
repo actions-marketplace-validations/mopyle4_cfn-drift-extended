@@ -1,6 +1,7 @@
 """Integration tests for the Auditor using moto mocks."""
 
 import json
+from importlib.metadata import version
 
 import boto3
 from moto import mock_aws
@@ -29,7 +30,8 @@ def test_no_drift_clean_stack() -> None:
     assert report.has_drift is False
     assert report.account_id != ""
     assert report.region == "us-east-1"
-    assert report.tool_version == "0.1.0"
+    # Report version must match the installed package version (pyproject.toml).
+    assert report.tool_version == version("cfn-drift-extended")
     assert report.timestamp != ""
 
 

@@ -1,6 +1,7 @@
 """Tests for the CLI interface."""
 
 import json
+from importlib.metadata import version
 
 import boto3
 from click.testing import CliRunner
@@ -114,7 +115,7 @@ def test_version_flag() -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
-    assert "1.1.0" in result.output
+    assert version("cfn-drift-extended") in result.output
 
 
 def test_invalid_region() -> None:

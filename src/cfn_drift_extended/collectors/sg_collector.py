@@ -2,7 +2,6 @@
 
 Required IAM permissions (least privilege):
 - ec2:DescribeSecurityGroups
-- ec2:DescribeSecurityGroupRules
 """
 
 import logging

@@ -1,5 +1,5 @@
 name: "cfn-drift-extended"
-description: "Detect additive drift in CloudFormation-managed resources (IAM, Security Groups, SNS, SQS, EventBridge)"
+description: "Detect additive drift outside declared template properties, complementing CloudFormation drift detection"
 branding:
   icon: "shield"
   color: "orange"
@@ -46,7 +46,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: "3.11"
 

@@ -1,17 +1,27 @@
 # cfn-drift-extended
 
-Detect **additive drift** and **orphaned resources** in CloudFormation-managed AWS accounts that native drift detection misses.
+Detect **additive drift** and **orphaned resources** in CloudFormation-managed AWS accounts — the changes that fall outside the scope of native drift detection.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-242%20passing-brightgreen.svg)](#-development)
-[![PyPI](https://img.shields.io/badge/PyPI-v1.1.0-blue.svg)](https://pypi.org/project/cfn-drift-extended/)
+[![Tests](https://img.shields.io/badge/Tests-248%20passing-brightgreen.svg)](#-development)
+[![PyPI](https://img.shields.io/pypi/v/cfn-drift-extended.svg)](https://pypi.org/project/cfn-drift-extended/)
 
 ## 🔍 The Problem
 
-CloudFormation drift detection only catches modifications or deletions to resources it manages. It completely misses **additive changes** — for example, a manually attached IAM policy on a CDK-managed role, an extra security group ingress rule, or an unauthorized SNS subscription. This tool fills that gap.
+CloudFormation drift detection compares the properties your template declares against the live resource, and it reports modifications, deletions, and additions within those declared properties. **Additive changes** that land outside the declared properties are outside that comparison. Examples include a managed policy attached to a role whose template does not declare `ManagedPolicyArns`, a rule added to a security group whose template declares no inline ingress, or an SNS subscription created outside the stack. This tool provides complementary coverage for exactly that space.
 
-**Real-world example:** A reconciliation job failed in QA but worked in Dev. Root cause: someone had manually attached a broader IAM policy to the orchestrator role in Dev. CloudFormation showed "IN_SYNC" because the manual addition wasn't a modification — it was an extra policy CFN didn't know about.
+**Real-world example:** A reconciliation job failed in QA but worked in Dev. Root cause: someone had manually attached a broader IAM policy to the orchestrator role in Dev. CloudFormation showed "IN_SYNC" because the role's template did not declare `ManagedPolicyArns`, so the attached policy sat outside the properties that drift detection compares.
+
+## 🤝 How this complements native tooling
+
+- **Keep running native drift detection.** It remains the authoritative check for the properties your templates declare.
+- **Drift-aware change sets** reconcile drift on declared properties at deploy time.
+- **The CloudFormation IaC generator** lists resources not managed by a stack. cfn-drift-extended adds deleted-stack provenance and a CI/CD pipeline gate for those resources.
+- **AWS Config** provides continuous configuration recording and history.
+- **cfn-drift-extended** covers additions that land outside declared properties.
+
+**Support:** cfn-drift-extended is an open source project maintained by its authors, not an AWS service. Please use [GitHub issues](https://github.com/mopyle4/cfn-drift-extended/issues) for questions and bug reports.
 
 ## 🎯 Supported Services
 
@@ -27,6 +37,8 @@ CloudFormation drift detection only catches modifications or deletions to resour
 | **Lambda** | Extra environment variables, extra layers, extra resource policies | MEDIUM |
 | **S3** | Extra bucket policy statements, extra lifecycle rules, extra CORS rules | MEDIUM |
 | **DynamoDB** | Extra GSIs, extra scaling targets, extra scaling policies | MEDIUM |
+
+**Security group default egress:** when a template declares no inline `SecurityGroupEgress` (standalone `AWS::EC2::SecurityGroupEgress` resources don't count), the EC2 default allow-all egress rule (`-1` to `0.0.0.0/0` or `::/0`) is expected and not reported; if the template declares inline egress, that default rule is reported as drift.
 
 ### Orphan detection (`orphans`)
 
@@ -116,6 +128,8 @@ For accounts with thousands of deleted stacks, the `--max-deleted-stacks` flag (
 
 The `--max-cfn-workers` flag (default: 5) controls separate concurrency for CloudFormation API calls, independent from the detector thread pool (`--max-workers`).
 
+> ⚠️ **90-day stack retention window (AWS platform limitation).** AWS retains `DELETE_COMPLETE` stack metadata for approximately 90 days. Resources orphaned by stacks deleted more than 90 days ago can no longer be queried via the CloudFormation API and will classify as `unknown` rather than `cfn_orphan_deleted_stack` — they're indistinguishable from console-created resources at that point. This is an AWS limitation, not a tool limitation. **Run orphan detection regularly** (e.g., weekly in CI) so deleted-stack residue is caught while still attributable.
+
 ## 🔒 Required IAM Permissions (Least Privilege)
 
 This tool uses **read-only** AWS API calls exclusively. No write operations are performed.
@@ -138,7 +152,6 @@ This tool uses **read-only** AWS API calls exclusively. No write operations are 
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
         "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSecurityGroupRules",
         "sqs:GetQueueAttributes",
         "sns:GetTopicAttributes",
         "sns:ListSubscriptionsByTopic",
@@ -271,7 +284,7 @@ For tighter scoping, restrict `Resource` to specific stack ARNs, role ARNs, secu
 
 - **Collectors** gather state (expected from CFN templates, actual from AWS APIs)
 - **Comparators** diff expected vs actual using set operations (O(n))
-- **Reporters** format results for different output targets (console, JSON, GitHub Checks)
+- **Reporters** format results for different output targets (console, JSON)
 - **Auditor** orchestrates the pipeline with parallel execution
 
 ## ⚡ Design Principles
@@ -316,7 +329,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run tests (242 tests)
+# Run tests (248 tests)
 pytest --cov=cfn_drift_extended --cov-report=term-missing
 
 # Lint

@@ -48,7 +48,7 @@ def _validate_region(ctx: click.Context, param: click.Parameter, value: str) -> 
 @click.group()
 @click.version_option(package_name="cfn-drift-extended")
 def main() -> None:
-    """cfn-drift-extended — Detect additive drift that CloudFormation misses."""
+    """cfn-drift-extended — Detect additive drift outside declared template properties."""
 
 
 @main.command()
